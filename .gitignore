@@ -4,6 +4,10 @@ venv/
 env/
 ENV/
 
+# Local RAG project — generated data (do not commit)
+data/
+*.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -14,10 +18,15 @@ __pycache__/
 .env.local
 *.env
 
-# Specific excluded documents
+# Specific excluded documents & internal plans
 Summer School Foundry Local Plan.docx
 *.docx
 *.pdf
+agent_rules.md
+implementation_plan.md
+docx_content.txt
+test_hybrid.py
+scratch*.py
 
 # IDE & Editor files
 .vscode/

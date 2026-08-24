@@ -1,1 +1,7 @@
-foundry-local-sdk 
+foundry-local-sdk
+numpy
+pypdf
+streamlit
+
+# Development / Testing
+pytest
