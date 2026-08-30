@@ -48,12 +48,12 @@ def _clean_response(text: str) -> str:
         cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
 
     # 2. Eğer model prompt sonundaki 'CEVAP:' veya 'Cevap:' etiketini kopyaladıysa, o etiketten önceki tüm prompt metnini at
-    for marker in ["CEVAP:", "Cevap:", "YANIT:", "Yanıt:", "Cevabınız:"]:
+    for marker in ["CEVAP:", "Cevap:", "YANIT:", "Yanıt:", "Cevabınız:", "Answer:", "RESPONSE:"]:
         if marker in cleaned:
             cleaned = cleaned.split(marker, 1)[-1]
 
     # 3. Prompt başlıkları ve kuralları sızdıysa satırları temizle
-    cleaned = re.sub(r"^(GöREV|GÖREV|KURALLAR|KAYNAK BELGELER|KAYNAKLAR|SORU|KULLANICI SORUSU|BELGE ALINTILARI):?.*$", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
+    cleaned = re.sub(r"^(GöREV|GÖREV|KURALLAR|KAYNAK BELGELER|KAYNAKLAR|SORU|KULLANICI SORUSU|BELGE ALINTILARI|LÜTFEN):?.*$", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
     cleaned = re.sub(r"</?belge[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</?source[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^---+.*$", "", cleaned, flags=re.MULTILINE)
