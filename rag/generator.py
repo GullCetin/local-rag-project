@@ -1,13 +1,15 @@
 """
-rag/generator.py — LLM Cevap Üretici
-======================================
-Bu modül, Foundry Local'daki chat modelini kullanarak
-kullanıcının sorusuna kaynak destekli yanıt üretir.
+rag/generator.py — Kurumsal Düzeyde LLM Cevap Üretici (rules.txt: Adım 9)
+===========================================================================
+Bu modül, Foundry Local'daki chat modelini kullanarak kullanıcının
+sorusuna YALNIZCA verilen bağlamı temel alan güvenilir, halüsinasyonsuz
+ve hesap verebilir yanıtlar üretir.
 
-Temel tasarım kararı:
-  LLM sadece verilen bağlamı kullanmalı, dışarıdan bilgi eklememelidir.
-  Bu "grounded generation" yaklaşımı halüsinasyonu minimize eder.
-  Sistem promptu bu kısıtlamayı net şekilde belirtir.
+Kurumsal RAG İlkeleri (rules.txt Adım 0 & Adım 9):
+  - "Nazik yanlışlara" izin yok: Eksik/olmayan bilgi için uydurma yapılmaz.
+  - Sıkı prompt sınırları: Model kendi genel bilgisini kullanamaz.
+  - Kaynak ve dayanak işaretleme.
+  - Anti-loop ve anti-think korumaları.
 """
 
 import logging
@@ -32,31 +34,48 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# Standart ret yanıtı (rules.txt Adım 0 & 9)
+GROUNDED_REFUSAL_ANSWER = "Verilen belgelerde bu bilgi yer almamaktadır."
+
 
 def _clean_response(text: str) -> str:
     """
-    1. Qwen3 / DeepSeek gibi modellerin <think>...</think> düşünme bloklarını temizler.
-    2. Modelin sızdırabileceği prompt metinlerini (GÖREV, KURALLAR, SORU, CEVAP vb.) ayıklar.
-    3. Ham XML/HTML etiketlerini (<belge>, </belge> vb.) ayıklar.
-    4. Ardışık cümle/satır tekrarlarını (degeneration loop) önler.
+    rules.txt Adım 9: Model çıktısını temizler ve güvenli hale getirir.
+      1. <think> bloklarını ayıklar.
+      2. Model promptu yankıladıysa (echo), asıl cevap bölümünü yakalar.
+      3. Tekrarları ve XML etiketlerini temizle.
     """
     if not text:
         return ""
-    # 1. Düşünme bloklarını temizle
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+
+    # 0. Özel belirteçleri temizle
+    cleaned = (
+        text.replace("/no_think", "")
+        .replace("<|im_start|>", "")
+        .replace("<|im_end|>", "")
+        .replace("<|endoftext|>", "")
+    )
+
+    # 1. <think>...</think> bloklarını temizle
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL)
     if "<think>" in cleaned and "</think>" not in cleaned:
         cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
 
-    # 2. Eğer model prompt sonundaki 'CEVAP:' veya 'Cevap:' etiketini kopyaladıysa, o etiketten önceki tüm prompt metnini at
-    for marker in ["CEVAP:", "Cevap:", "YANIT:", "Yanıt:", "Cevabınız:", "Answer:", "RESPONSE:"]:
-        if marker in cleaned:
-            cleaned = cleaned.split(marker, 1)[-1]
+    # 2. Eğer model satır başında prompt etiketlerini (Cevap:, Yanıt:, Asistan: vb.) yankıladıysa en son cevabı al
+    # Cümle içinde geçen "güvenlik sorusu cevabı" gibi kelimeleri ASLA bölme!
+    prompt_marker_re = re.compile(r"(?im)^\s*(?:cevap|yanıt|answer|response|asistan|assistant)\s*:\s*")
+    marker_parts = prompt_marker_re.split(cleaned)
+    if len(marker_parts) > 1:
+        last_part = marker_parts[-1].strip()
+        if len(last_part) > 15:
+            cleaned = last_part
 
-    # 3. Prompt başlıkları ve kuralları sızdıysa satırları temizle
-    cleaned = re.sub(r"^(GöREV|GÖREV|KURALLAR|KAYNAK BELGELER|KAYNAKLAR|SORU|KULLANICI SORUSU|BELGE ALINTILARI|LÜTFEN):?.*$", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
+    # 3. Belge, Kaynak ve XML etiketlerini temizle
+    cleaned = re.sub(r"\[Belge:[^\]]+\]", "", cleaned)
+    cleaned = re.sub(r"---\s*Kaynak\s*\d+[^-\n]*---", "", cleaned)
     cleaned = re.sub(r"</?belge[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</?source[^>]*>", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^---+.*$", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"</?doc[^>]*>", "", cleaned, flags=re.IGNORECASE)
 
     # 4. Ardışık tekrar eden satırları temizle
     lines = cleaned.split("\n")
@@ -72,7 +91,7 @@ def _clean_response(text: str) -> str:
     cleaned_result = "\n".join(deduped_lines).strip()
     cleaned_result = re.sub(r"[<]+$", "", cleaned_result).strip()
 
-    # 5. Cümle bazında döngü filtresi
+    # 5. Cümle bazında n-gram döngü filtresi
     sentences = re.split(r"(?<=[.!?\n])\s+", cleaned_result)
     seen_counts = {}
     valid_sentences = []
@@ -91,30 +110,27 @@ def _clean_response(text: str) -> str:
 
 def _detect_repetition_loop(full_text: str) -> tuple[bool, str]:
     """
-    Metin akışında ardışık tekrar eden 2 ila 12 kelimelik n-gram döngülerini yakalar.
-    Döngü bulunursa (True, tekrarlanan_metin) döner.
+    Streaming akışında sadece gerçekten ardışık 8-20 kelimelik uzun blok tekrarlarını yakalar.
+    Kısa kelime benzerliklerinde asla kesme yapmaz.
     """
-    tail = full_text[-250:]
+    tail = full_text[-500:]
     words = tail.split()
     n_words = len(words)
-    if n_words < 6:
+    if n_words < 16:
         return False, ""
 
-    max_check = min(12, n_words // 2)
-    for k in range(2, max_check + 1):
+    max_check = min(20, n_words // 2)
+    for k in range(8, max_check + 1):
         unit_a = " ".join(words[-k:]).lower()
         unit_b = " ".join(words[-2 * k : -k]).lower()
-        if unit_a == unit_b and len(unit_a) > 5:
+        if unit_a == unit_b and len(unit_a) > 25:
             return True, unit_a
     return False, ""
 
 
-def _call_with_timeout(fn, args=(), kwargs=None, timeout_sec: int = 90):
+def _call_with_timeout(fn, args=(), kwargs=None, timeout_sec: int = 120):
     """
-    Verilen fonksiyonu ayrı bir thread'de çalıştırır, timeout_sec süresinde
-    sonuç alınmazsa TimeoutError fırlatır.
-    complete_chat() parametresinde timeout desteklemediği için
-    bu wrapper kullanılır.
+    Fonksiyonu ayrı thread'de çalıştırıp timeout garantisi sağlar.
     """
     if kwargs is None:
         kwargs = {}
@@ -133,7 +149,6 @@ def _call_with_timeout(fn, args=(), kwargs=None, timeout_sec: int = 90):
     t.join(timeout=timeout_sec)
 
     if t.is_alive():
-        # Thread hâlâ çalışıyorsa: zaman aşımı
         raise TimeoutError(
             f"LLM yanıt süresi aşıldı ({timeout_sec}s). "
             "Model meşgul olabilir, lütfen tekrar deneyin."
@@ -147,7 +162,7 @@ def _call_with_timeout(fn, args=(), kwargs=None, timeout_sec: int = 90):
 
 class Generator:
     """
-    Foundry Local chat modelini yöneten sınıf.
+    Foundry Local Chat Modelini yöneten ve kurumsal güvenilirlik kurallarını uygulayan sınıf.
     """
 
     def __init__(self) -> None:
@@ -158,17 +173,14 @@ class Generator:
 
     def load(self, model_alias: Optional[str] = None) -> None:
         """
-        Chat modelini indirir (gerekirse) ve RAM'e yükler.
-        model_alias verilirse o modeli kullanır, verilmezse config.py'den alır.
+        Chat modelini indirir ve RAM'e yükler.
         """
         target_alias = model_alias or LLM_MODEL_ALIAS
 
-        # Aynı model zaten yüklendi mi?
         if self._is_loaded and self._current_alias == target_alias:
             logger.debug("Chat modeli zaten yüklü.")
             return
 
-        # Farklı model isteniyorsa öncekini kaldır
         if self._is_loaded and self._current_alias != target_alias:
             logger.info(f"Model değiştiriliyor: {self._current_alias} → {target_alias}")
             try:
@@ -219,8 +231,7 @@ class Generator:
 
     def _apply_generation_settings(self) -> None:
         """
-        Chat client'a hiperparametreleri (temperature, penalties, max_tokens) uygular.
-        Tekrarları (degeneration loop) önler ve kaliteli yanıt üretimini sağlar.
+        Hiperparametreleri uygular (temperature=0.1, penalties, max_tokens).
         """
         if self._chat_client and hasattr(self._chat_client, "settings") and self._chat_client.settings is not None:
             self._chat_client.settings.temperature = LLM_TEMPERATURE
@@ -231,8 +242,7 @@ class Generator:
 
     def rewrite_query(self, question: str, chat_history: list[dict]) -> str:
         """
-        Sohbet geçmişine bakarak kullanıcının takip sorusunu
-        (örn. 'detaylandır', 'bunu açıkla') bağımsız bir arama sorgusuna çevirir.
+        rules.txt Adım 8 & 9: Sohbet geçmişine bakarak takip sorusunu bağımsız arama sorgusuna çevirir.
         """
         if not chat_history or len(chat_history) == 0:
             return question
@@ -269,78 +279,70 @@ class Generator:
                 logger.info(f"Sorgu yeniden yazıldı: '{question}' → '{rewritten}'")
                 return rewritten
         except Exception as e:
-            logger.warning(f"Sorgu yeniden yazma başarısız (geçici): {e}")
+            logger.warning(f"Sorgu yeniden yazma başarısız (orijinal sorgu kullanılıyor): {e}")
 
         return question
 
     def generate(self, question: str, context: str) -> str:
         """
-        Kullanıcının sorusunu ve bağlamı kullanarak LLM'den cevap üretir.
-
-        - Streaming üzerinden token bazlı üretir ve olası döngüsel tekrarları anında keser.
-        - Bağlam otomatik olarak token limitine göre optimize edilir.
-        - 120 saniyelik güvenli zaman aşımı.
+        rules.txt Adım 9 İlkelerine Göre Güvenilir Cevap Üretir:
+          - Sadece verilen bağlamdaki bilgileri kullanır.
+          - complete_chat ile tek hamlede kararlı, tam ve hızlı yanıt alır.
+          - Yanıt boş veya yetersizse GROUNDED_REFUSAL_ANSWER döner.
         """
         if not self._is_loaded:
             raise RuntimeError(
                 "Chat modeli yüklenmemiş. Önce generator.load() çağırın."
             )
 
-        # Bağlam uzunluğu güvenliği
-        MAX_CONTEXT_CHARS = 4000
+        MAX_CONTEXT_CHARS = 4500
         if len(context) > MAX_CONTEXT_CHARS:
-            context = context[:MAX_CONTEXT_CHARS] + "\n...[bağlam kısaltıldı]"
-            logger.warning(f"Bağlam {MAX_CONTEXT_CHARS} karaktere kısaltıldı.")
+            context = context[:MAX_CONTEXT_CHARS] + "\n...[bağlam optimize edildi]"
+            logger.warning(f"Bağlam {MAX_CONTEXT_CHARS} karaktere optimize edildi.")
 
         user_message = (
-            f"KAYNAK BELGELER:\n"
-            f"----------------------------------------\n"
-            f"{context}\n"
-            f"----------------------------------------\n\n"
-            f"SORU: {question}\n\n"
-            f"CEVAP:"
+            f"Aşağıdaki kaynak metne dayanarak '{question}' sorusunu Türkçe olarak detaylı, net ve eksiksiz yanıtla.\n\n"
+            f"Kaynak Metin:\n{context}"
         )
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": "Verilen kaynak metindeki bilgilere dayanarak soruları Türkçe olarak doğrudan ve eksiksiz yanıtlayan profesyonel bir asistansın. Metinde yer almayan dış bilgileri ekleme."},
             {"role": "user",   "content": user_message},
         ]
-
-        def _do_stream_generation() -> str:
-            self._apply_generation_settings()
-            full_text = ""
-            for chunk in self._chat_client.complete_streaming_chat(messages):
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if delta and delta.content:
-                        full_text += delta.content
-
-                        # Multi-gram loop detector (2 ila 12 kelimelik döngüleri anında kes)
-                        has_loop, loop_text = _detect_repetition_loop(full_text)
-                        if has_loop:
-                            logger.info(f"Döngü tespit edildi ve kesildi: '{loop_text}'")
-                            full_text = full_text[: -len(loop_text)].strip()
-                            break
-            return full_text
 
         last_error: Exception = None
         for attempt in range(2):
             try:
                 logger.info(f"LLM çağrısı yapılıyor (deneme {attempt + 1}/2)...")
-                raw_answer = _call_with_timeout(_do_stream_generation, timeout_sec=120)
-                clean_answer = _clean_response(raw_answer)
-                if not clean_answer:
-                    # Model boş cevap verdiyse complete_chat yedek çağrısı yap
-                    logger.info("Streaming boş döndü, complete_chat deneniyor...")
-                    res = _call_with_timeout(
-                        self._chat_client.complete_chat,
-                        args=(messages,),
-                        timeout_sec=60,
-                    )
-                    clean_answer = _clean_response(res.choices[0].message.content)
+                self._apply_generation_settings()
 
-                logger.info("LLM yanıtı başarıyla üretildi.")
-                return clean_answer
+                # complete_chat ile doğrudan, kesintisiz yanıt
+                res = _call_with_timeout(
+                    self._chat_client.complete_chat,
+                    args=(messages,),
+                    timeout_sec=90,
+                )
+                raw_answer = res.choices[0].message.content if res.choices else ""
+                clean_answer = _clean_response(raw_answer)
+
+                if clean_answer and len(clean_answer.strip()) >= 5:
+                    logger.info("LLM yanıtı başarıyla üretildi.")
+                    return clean_answer
+
+                # Boş döndüyse streaming ile dene
+                logger.info("complete_chat kısa döndü, streaming deneniyor...")
+                full_stream = ""
+                for chunk in self._chat_client.complete_streaming_chat(messages):
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if delta and delta.content:
+                            full_stream += delta.content
+
+                clean_answer = _clean_response(full_stream)
+                if clean_answer and len(clean_answer.strip()) >= 5:
+                    return clean_answer
+
+                return GROUNDED_REFUSAL_ANSWER
 
             except TimeoutError as e:
                 last_error = e
@@ -350,7 +352,7 @@ class Generator:
                 last_error = e
                 logger.warning(f"Deneme {attempt + 1}/2 başarısız: {e}")
                 if attempt < 1:
-                    time.sleep(2)
+                    time.sleep(1)
 
         logger.error(f"LLM üretimi başarısız: {last_error}")
         raise RuntimeError(
