@@ -42,62 +42,83 @@ EMBEDDING_MODEL_ALIAS = "qwen3-embedding-0.6b"
 APP_NAME = "local-rag-assistant"
 
 # ---------------------------------------------------------------------------
-# Chunking Configuration
+# Supported Document Formats & Filtering (rules.txt: Adım 1 - Bilgi Envanteri)
 # ---------------------------------------------------------------------------
-# Bir chunk'ın minimum karakter sayısı (çok kısa chunk'ları filtreler)
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf"}
+
+# RAG bilgi hattına girmemesi gereken çöp, lisans ve hassas dosya kalıpları
+IGNORED_FILE_PATTERNS = [
+    r"^notice(\.txt)?$",
+    r"^license(\.txt)?$",
+    r"^.*apikey.*$",
+    r"^.*secret.*$",
+    r"^.*\.removed$",
+    r"^.*\.tmp$",
+    r"^.*\.log$",
+]
+
+# Ingestion'da kabul edilecek maksimum dosya boyutu (MB)
+MAX_INGEST_FILE_SIZE_MB = 2.0
+
+# Tek bir dosyadan üretilecek maksimum chunk sayısı
+MAX_CHUNKS_PER_FILE = 200
+
+# ---------------------------------------------------------------------------
+# Chunking Configuration (rules.txt: Adım 5 - Bağlam Bütünlüğü)
+# ---------------------------------------------------------------------------
+# Bir chunk'ın minimum karakter sayısı (çok kısa gürültüleri filtreler)
 CHUNK_MIN_CHARS = 50
 
-# Bir chunk'ın maximum karakter sayısı (çok uzun chunk'ları böler)
+# Bir chunk'ın maximum karakter sayısı (bağlamı koparmadan bölmek için)
 CHUNK_MAX_CHARS = 800
 
-# ---------------------------------------------------------------------------
-# Retrieval Configuration
-# ---------------------------------------------------------------------------
-# Her sorgu için kaç chunk getirilsin?
-# 2 = optimum token ve bağlam dengesi, CPU'da hızlı üretim
-TOP_K_CHUNKS = 2
+# Paragraflar veya alt parçalar arası örtüşme (overlap) karakter sayısı
+CHUNK_OVERLAP_CHARS = 80
 
 # ---------------------------------------------------------------------------
-# LLM Generation Parameters (Anti-repetition & quality tuning)
+# Retrieval Configuration (rules.txt: Adım 8 - Retrieval Tasarımı)
+# ---------------------------------------------------------------------------
+# Her sorgu için en odaklı kaç chunk getirilsin?
+# 3 chunk = Tam ve zengin bağlam (giriş cümleleri + maddeler + detaylar)
+TOP_K_CHUNKS = 3
+
+# Hibrit Arama Ağırlıkları: Dense (Semantik) + Lexical (Sözcük/Başlık)
+HYBRID_DENSE_WEIGHT = 0.60
+HYBRID_LEXICAL_WEIGHT = 0.40
+
+# Cosine similarity / Hibrit skor filtre eşiği (alakasız belgeleri eler)
+SCORE_THRESHOLD = 0.30
+
+# ---------------------------------------------------------------------------
+# LLM Generation Parameters (rules.txt: Adım 9 - Modelin Sınırlarını Yönetmek)
 # ---------------------------------------------------------------------------
 LLM_TEMPERATURE = 0.1
 LLM_TOP_P = 0.9
-LLM_MAX_TOKENS = 450
-LLM_FREQUENCY_PENALTY = 0.5   # Repetition prevention
-LLM_PRESENCE_PENALTY = 0.2    # Topic progress & diversity
+LLM_MAX_TOKENS = 512
+LLM_FREQUENCY_PENALTY = 0.3
+LLM_PRESENCE_PENALTY = 0.1
 
 # ---------------------------------------------------------------------------
-# LLM System Prompt (Compact & Structured for Professional Turkish Output)
+# LLM System Prompt (rules.txt: Adım 0 ve Adım 9 - Grounded Generation)
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """\
-Sen yardımsever, bilgili ve profesyonel bir yapay zeka asistanısın.
-Sağlanan kaynak belgelerdeki bilgilere dayanarak kullanıcının sorusunu net, maddeli ve doğru Türkçe ile yanıtlarsın.
-Belgelerde olmayan bilgiyi eklemezsin ve tekrara düşmezsin.
+Sen bir Belge Soru-Cevap asistanısın.
+Görevin: Verilen KAYNAK BELGELER'deki bilgilere göre kullanıcının sorusunu Türkçe olarak net ve doğrudan yanıtlamaktır.
+Kural 1: Yalnızca verilen belgelerdeki bilgileri kullan.
+Kural 2: Eğer belgelerde bilgi yoksa "Verilen belgelerde bu bilgi yer almamaktadır." de.
+Kural 3: Doğrudan cevabı yaz, gereksiz giriş cümleleri ekleme.
 """
 
 # Sorgu yeniden yazma şablonu (konuşma geçmişi için)
 QUERY_REWRITE_PROMPT = """\
 Aşağıdaki sohbet geçmişini ve kullanıcının son sorusunu incele.
-Kullanıcının son sorusu önceki konuşmaya atıfta bulunuyorsa, belge veritabanında semantik arama yapmaya uygun, tek başına anlamlı, kısa bir arama sorgusuna dönüştür.
-Eğer zaten bağımsız bir soruysa, değiştirmeden döndür.
-SADECE yeni arama sorgusunu yaz, açıklama ekleme.
+Kullanıcının son sorusu önceki konuşmaya atıfta bulunuyorsa (ör. 'bunu açıkla', 'neden peki'), belge veritabanında semantik ve kelime araması yapmaya uygun, tek başına anlamlı, kısa bir Türkçe arama sorgusuna dönüştür.
+Eğer soru zaten bağımsızsa, aynen döndür.
+SADECE yeni arama sorgusunu yaz, hiçbir açıklama ekleme.
 """
 
 # ---------------------------------------------------------------------------
-# Supported Document Formats
-# ---------------------------------------------------------------------------
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf"}
-
-# ---------------------------------------------------------------------------
-# Retrieval Quality Threshold
-# ---------------------------------------------------------------------------
-# Cosine similarity skoru bu değerin altındaki chunk'lar LLM'e verilmez.
-# 0.0 = hiç filtreleme yok, 1.0 = sadece mükemmel eşleşmeler
-# Tavsiye: 0.15 - 0.25 arası
-SCORE_THRESHOLD = 0.18
-
-# ---------------------------------------------------------------------------
-# UI Configuration
+# UI Configuration (rules.txt: Adım 10 - İzleme ve Bakım)
 # ---------------------------------------------------------------------------
 APP_TITLE = "Local RAG AI Assistant"
-APP_DESCRIPTION = "Ask questions about your documents — 100% offline, powered by Foundry Local"
+APP_DESCRIPTION = "Kurumsal Düzeyde Güvenilir Belge Soru-Cevap Sistemi (100% Yerel & Çevrimdışı)"
