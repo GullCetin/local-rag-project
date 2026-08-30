@@ -24,8 +24,18 @@ SAMPLE_DOCS_DIR = os.path.join(BASE_DIR, "docs", "sample_docs")
 # ---------------------------------------------------------------------------
 # Model Configuration
 # ---------------------------------------------------------------------------
-# Foundry Local katalogundaki model isimleri — değiştirme, SDK'dan geliyor
-LLM_MODEL_ALIAS = "phi-3.5-mini"
+# Kullanılabilir LLM modelleri (küçükten büyüğe, en hızlıdan yavaşa)
+# qwen3-1.7b  : ~1.4GB, ~8-15sn, hafif cevaplar
+# qwen3-4b    : ~2.8GB, ~20-35sn, dengeli
+# phi-3.5-mini: ~2.6GB, ~30-60sn, çok yönlü
+AVAILABLE_LLM_MODELS = [
+    ("qwen3-1.7b",   "Qwen3-1.7B  ⚡ (Hızlı ~8-15sn, 1.4GB)"),
+    ("qwen3-4b",     "Qwen3-4B   ⚡⚡ (Dengeli ~20-35sn, 2.8GB)"),
+    ("phi-3.5-mini", "Phi-3.5-mini  (Yavaş ~30-60sn, 2.6GB)"),
+]
+
+# Aktif LLM model alias  — AVAILABLE_LLM_MODELS listesindeki alias'lardan biri olmalı
+LLM_MODEL_ALIAS = "qwen3-1.7b"
 EMBEDDING_MODEL_ALIAS = "qwen3-embedding-0.6b"
 
 # Foundry Local uygulaması adı (SDK loglama için)
