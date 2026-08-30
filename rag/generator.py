@@ -89,6 +89,26 @@ def _clean_response(text: str) -> str:
     return re.sub(r"[<]+$", "", final_result).strip()
 
 
+def _detect_repetition_loop(full_text: str) -> tuple[bool, str]:
+    """
+    Metin akışında ardışık tekrar eden 2 ila 12 kelimelik n-gram döngülerini yakalar.
+    Döngü bulunursa (True, tekrarlanan_metin) döner.
+    """
+    tail = full_text[-250:]
+    words = tail.split()
+    n_words = len(words)
+    if n_words < 6:
+        return False, ""
+
+    max_check = min(12, n_words // 2)
+    for k in range(2, max_check + 1):
+        unit_a = " ".join(words[-k:]).lower()
+        unit_b = " ".join(words[-2 * k : -k]).lower()
+        if unit_a == unit_b and len(unit_a) > 5:
+            return True, unit_a
+    return False, ""
+
+
 def _call_with_timeout(fn, args=(), kwargs=None, timeout_sec: int = 90):
     """
     Verilen fonksiyonu ayrı bir thread'de çalıştırır, timeout_sec süresinde
@@ -295,23 +315,12 @@ class Generator:
                     if delta and delta.content:
                         full_text += delta.content
 
-                        # Multi-gram loop detector (2 ila 12 kelimelik döngüleri tespit et)
-                        tail = full_text[-250:]
-                        words = tail.split()
-                        n_words = len(words)
-                        if n_words >= 6:
-                            max_check = min(12, n_words // 2)
-                            loop_found = False
-                            for k in range(2, max_check + 1):
-                                unit_a = " ".join(words[-k:]).lower()
-                                unit_b = " ".join(words[-2 * k : -k]).lower()
-                                if unit_a == unit_b and len(unit_a) > 5:
-                                    logger.info(f"Döngü tespit edildi ({k} kelime) ve kesildi: '{unit_a}'")
-                                    full_text = full_text[: -len(unit_a)].strip()
-                                    loop_found = True
-                                    break
-                            if loop_found:
-                                break
+                        # Multi-gram loop detector (2 ila 12 kelimelik döngüleri anında kes)
+                        has_loop, loop_text = _detect_repetition_loop(full_text)
+                        if has_loop:
+                            logger.info(f"Döngü tespit edildi ve kesildi: '{loop_text}'")
+                            full_text = full_text[: -len(loop_text)].strip()
+                            break
             return full_text
 
         last_error: Exception = None
