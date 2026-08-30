@@ -1,0 +1,44 @@
+# Python Programlama Dili — Temel Kavramlar
+
+Python, 1991 yılında Guido van Rossum tarafından geliştirilen, genel amaçlı, yüksek seviyeli bir programlama dilidir.
+Okunabilirliği ön planda tutan tasarımı sayesinde hem yeni başlayanlar hem de deneyimli geliştiriciler tarafından yoğun biçimde kullanılmaktadır.
+
+## Temel Özellikler
+
+Python dinamik tipli bir dildir; değişkenlere değer atandığında tip otomatik belirlenir.
+Derleyici yerine yorumlayıcı (interpreter) kullanan Python, yazılan kodu satır satır çalıştırır.
+Platform bağımsızlığı sayesinde Windows, macOS ve Linux üzerinde aynı kod çalışır.
+
+## Veri Yapıları
+
+Python'da dört temel yerleşik veri yapısı vardır:
+
+Liste (list): Sıralı, değiştirilebilir öğe koleksiyonudur. Köşeli parantez [] ile tanımlanır.
+Örnek: meyveler = ["elma", "armut", "muz"]
+
+Demet (tuple): Sıralı ancak değiştirilemez koleksiyondur. Parantez () ile tanımlanır.
+Örnek: koordinat = (41.0, 29.0)
+
+Sözlük (dict): Anahtar-değer çiftlerini saklar. Süslü parantez {} ile tanımlanır.
+Örnek: kisi = {"ad": "Ahmet", "yas": 25}
+
+Küme (set): Tekrarsız öğeler barındıran sırasız koleksiyondur.
+Örnek: renkler = {"kırmızı", "mavi", "yeşil"}
+
+## Fonksiyonlar
+
+Python'da fonksiyonlar def anahtar kelimesiyle tanımlanır.
+Fonksiyonlar parametre alabilir, değer döndürebilir ve varsayılan parametre değerleri tanımlanabilir.
+Lambda ile tek satırlık anonim fonksiyonlar da oluşturulabilir.
+
+## Nesne Yönelimli Programlama
+
+Python tam anlamıyla nesne yönelimli bir dildir.
+Sınıflar class anahtar kelimesiyle tanımlanır.
+Kalıtım, kapsülleme ve çok biçimlilik desteklenir.
+Her şey Python'da bir nesnedir; sayılar, dizeler ve fonksiyonlar dahil.
+
+## Yaygın Kullanım Alanları
+
+Python; veri bilimi, makine öğrenmesi, web geliştirme, otomasyon ve bilimsel hesaplama alanlarında yaygın biçimde kullanılmaktadır.
+NumPy, Pandas, TensorFlow, Flask ve Django gibi popüler kütüphaneler Python ekosisteminin temel bileşenleridir.
