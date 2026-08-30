@@ -69,8 +69,8 @@ class RAGResponse:
 
     @property
     def unique_sources(self) -> list[str]:
-        """Tekrarsız kaynak listesi, sıralı."""
-        return sorted(set(self.sources))
+        """Tekrarsız ve eklenme sırasını koruyan kaynak belge listesi."""
+        return list(dict.fromkeys(self.sources))
 
 
 class RAGPipeline:
