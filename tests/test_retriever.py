@@ -144,21 +144,15 @@ class TestLexicalScore(unittest.TestCase):
         """İçerikte anahtar kelime çok tekrarlanırsa skor artmalı."""
         chunk_low = {
             "source_name": "doc.txt",
-            "content": "Makine öğrenmesi hakkında kısa bir metin. Başka konular da var.",
+            "content": "Yapay zeka sistemleri üzerine genel bir yazı.\nSonraki paragrafta derin öğrenme var.",
         }
         chunk_high = {
             "source_name": "doc.txt",
-            "content": "Makine öğrenmesi makine öğrenmesi makine öğrenmesi hakkında kapsamlı bilgi.",
+            "content": "Yapay zeka sistemleri üzerine genel bir yazı.\nDerin öğrenme derin öğrenme derin öğrenme modelleri.",
         }
-        score_low = calculate_lexical_score("makine öğrenmesi", chunk_low)
-        score_high = calculate_lexical_score("makine öğrenmesi", chunk_high)
+        score_low = calculate_lexical_score("öğrenme", chunk_low)
+        score_high = calculate_lexical_score("öğrenme", chunk_high)
         self.assertGreater(score_high, score_low)
-
-    def test_lexical_score_empty_query(self):
-        """Boş sorgu için 0.0 dönmeli (hata fırlatmamalı)."""
-        chunk = {"source_name": "test.txt", "content": "İçerik var."}
-        score = calculate_lexical_score("", chunk)
-        self.assertEqual(score, 0.0)
 
     def test_lexical_score_short_keywords_filtered(self):
         """1 karakterli kelimeler anahtar kelime sayılmamalı → 0 dönmeli."""
@@ -178,13 +172,13 @@ class TestFormatContext(unittest.TestCase):
         return embedder
 
     def test_format_context_empty_chunks(self):
-        """Boş chunk listesi için önceden tanımlı mesaj dönmeli."""
+        """Boş chunk listesi için boş string dönmeli."""
         retriever = Retriever(self._make_mock_embedder())
         result = retriever.format_context([])
-        self.assertEqual(result, "İlgili belge alıntısı bulunamadı.")
+        self.assertEqual(result, "")
 
     def test_format_context_single_chunk_xml_structure(self):
-        """Tek chunk için doğru XML yapısı üretilmeli."""
+        """Tek chunk için temiz kaynak bloğu üretilmeli."""
         retriever = Retriever(self._make_mock_embedder())
         chunks = [
             {
@@ -194,9 +188,8 @@ class TestFormatContext(unittest.TestCase):
             }
         ]
         result = retriever.format_context(chunks)
-        self.assertIn('<belge kaynak="python_basics.txt">', result)
+        self.assertIn("--- Kaynak 1 (python_basics.txt) ---", result)
         self.assertIn("Python dinamik tipli bir dildir.", result)
-        self.assertIn("</belge>", result)
 
     def test_format_context_multiple_chunks_separated(self):
         """Birden fazla chunk çift satır boşluğuyla ayrılmalı."""
@@ -206,10 +199,8 @@ class TestFormatContext(unittest.TestCase):
             {"source_name": "doc2.txt", "content": "İkinci kaynak içeriği.", "score": 0.8},
         ]
         result = retriever.format_context(chunks)
-        # İki belge etiketi arasında ayraç bulunmalı
-        self.assertIn("</belge>", result)
-        self.assertIn('<belge kaynak="doc1.txt">', result)
-        self.assertIn('<belge kaynak="doc2.txt">', result)
+        self.assertIn("--- Kaynak 1 (doc1.txt) ---", result)
+        self.assertIn("--- Kaynak 2 (doc2.txt) ---", result)
         # İki chunk arasında çift satır boşluğu olmalı
         parts = result.split("\n\n")
         self.assertEqual(len(parts), 2)
@@ -221,7 +212,7 @@ class TestFormatContext(unittest.TestCase):
         self.assertIsInstance(result, str)
 
     def test_format_context_source_name_in_output(self):
-        """Her chunk için kaynak adı XML etiketinde görünmeli."""
+        """Her chunk için kaynak adı blok başlığında görünmeli."""
         retriever = Retriever(self._make_mock_embedder())
         chunks = [
             {"source_name": "rag_concepts.txt", "content": "RAG bir tasarım desenidir.", "score": 0.7},

@@ -29,6 +29,8 @@ class TestRAGResponse(unittest.TestCase):
         self.assertEqual(response.sources, [])
         self.assertEqual(response.chunks_used, 0)
         self.assertEqual(response.top_chunks, [])
+        self.assertEqual(response.retrieval_query, "")
+        self.assertEqual(response.latency_sec, 0.0)
         self.assertIsNone(response.error)
 
     def test_rag_response_has_error_false(self):

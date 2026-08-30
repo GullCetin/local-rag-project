@@ -183,5 +183,36 @@ class TestChunkText(unittest.TestCase):
             self.assertLessEqual(len(chunk), CHUNK_MAX_CHARS + 20)  # +20 prefix toleransı
 
 
+    def test_noise_lines_filtered(self):
+        """URL-slug benzeri gürültü satırları (resim adları vb.) chunk'ta yer almamalı."""
+        text = (
+            "5. Pilotlar havada uyur mu?\n"
+            "Pilot-Uyku\n"
+            "Evet, pilotlar içeride uyuyorlar. Ancak bu uyku en fazla 10 dakikalık bir kestirme.\n\n"
+            "Ucuslarla-Ilgili-Bilinmeyenler\n"
+            "Başka bir paragraf da burayla ilgilidir ve yeterince uzundur. " * 3
+        )
+        chunks = chunk_text(text, source_name="ucuslar.txt")
+        all_text = " ".join(chunks)
+        # Gürültü satırları chunk'ta çıkmamalı
+        self.assertNotIn("Pilot-Uyku", all_text)
+        self.assertNotIn("Ucuslarla-Ilgili-Bilinmeyenler", all_text)
+        # Ama gerçek içerik korunmalı
+        self.assertIn("10 dakika", all_text)
+
+    def test_numbered_section_sets_context(self):
+        """Numaralı bölüm başlıkları (ör: '5. Pilotlar havada uyur mu?') Konu bağlamı ayarlamalı."""
+        text = (
+            "5. Pilotlar havada uyur mu?\n"
+            "Evet, pilotlar içeride uyuyorlar. Bu uyku en fazla 10 dakikalık bir kestirme halinde.\n\n"
+            "Kalkıştan sonra otomatik pilota geçilir ve bu pek bir sorun teşkil etmez."
+        )
+        chunks = chunk_text(text, source_name="ucuslar.txt")
+        self.assertTrue(len(chunks) > 0, "En az bir chunk üretilmeli")
+        all_text = " ".join(chunks)
+        # Bölüm başlığı Konu: bağlamına dönüşmeli
+        self.assertIn("Pilotlar havada uyur mu", all_text)
+
+
 if __name__ == "__main__":
     unittest.main()
