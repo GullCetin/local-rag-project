@@ -57,8 +57,13 @@ CHUNK_MAX_CHARS = 800
 TOP_K_CHUNKS = 4
 
 # ---------------------------------------------------------------------------
-# LLM Generation Configuration (Grounded Answer Generation Framework)
+# LLM Generation Parameters (Anti-repetition & quality tuning)
 # ---------------------------------------------------------------------------
+LLM_TEMPERATURE = 0.1
+LLM_TOP_P = 0.9
+LLM_MAX_TOKENS = 450
+LLM_FREQUENCY_PENALTY = 0.5   # Repetition prevention
+LLM_PRESENCE_PENALTY = 0.2    # Topic progress & diversity
 SYSTEM_PROMPT = """\
 # ROL VE TEMEL GÖREV
 Sen, bir Retrieval-Augmented Generation (RAG) sisteminin **Grounded Answer Generation Agent**'ısın.
