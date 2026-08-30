@@ -1,37 +1,49 @@
-import sys
-from foundry_local_sdk import Configuration, FoundryLocalManager
+"""
+main.py — Local RAG AI Assistant Giriş Noktası
+===============================================
+Kullanım:
+  python main.py           # Streamlit web arayüzü (varsayılan)
+  python main.py --ui cli  # Terminal arayüzü
+"""
 
-def main():
-    print("Yapay zeka motoru başlatılıyor... Lütfen bekleyin.")
-    
-    config = Configuration(app_name="local-rag-test")
-    
-    FoundryLocalManager.initialize(config)
-    
-    manager = FoundryLocalManager.instance
-    
-    model = manager.catalog.get_model("phi-3.5-mini")
-    if model is None:
-        print("Hata: Belirtilen model katalogda bulunamadı!")
-        return
-    if not model.is_cached:
-        print("Model yerel bilgisayarda bulunamadı. İndirme başlatılıyor...")
-        def progress_callback(progress):
-            print(f"İndiriliyor: %{round(progress)}")
-        model.download(progress_callback)
-    
-    print("Model hafızaya yükleniyor...")
-    model.load()
-    
-    chat_client = model.get_chat_client()
-    
-    print("\n--- Model Test Ediliyor ---")
-    response = chat_client.complete_chat([
-        {"role": "system", "content": "You are a helpful assistant. Keep your answer under 10 words."},
-        {"role": "user", "content": "Hello, world!"}
-    ])
-    
-    print(f"\nModelden Gelen Cevap: {response.choices[0].message.content}")
+import sys
+import os
+import argparse
+import subprocess
+
+
+def run_streamlit() -> None:
+    """Streamlit web arayüzünü başlatır."""
+    app_path = os.path.join(os.path.dirname(__file__), "ui", "app.py")
+    subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
+
+
+def run_cli_ui() -> None:
+    """Terminal arayüzünü başlatır."""
+    from ui.cli import run_cli
+    run_cli()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Local RAG AI Assistant")
+    parser.add_argument(
+        "--ui",
+        choices=["web", "cli"],
+        default="web",
+        help="Arayüz modu: web (Streamlit, varsayılan) veya cli",
+    )
+    parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="CLI modunda başlat (kısayol)",
+    )
+    args = parser.parse_args()
+
+    if args.cli or args.ui == "cli":
+        run_cli_ui()
+    else:
+        run_streamlit()
+
 
 if __name__ == "__main__":
-    main()
+    main()
