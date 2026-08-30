@@ -21,12 +21,19 @@ __pycache__/
 # Specific excluded documents & internal plans
 Summer School Foundry Local Plan.docx
 *.docx
-*.pdf
 agent_rules.md
 implementation_plan.md
 docx_content.txt
 test_hybrid.py
 scratch*.py
+debug_*.py
+
+# Security: API key files must NEVER be committed
+*ApiKey*
+*apikey*
+*api_key*
+*secret*
+*.REMOVED
 
 # IDE & Editor files
 .vscode/

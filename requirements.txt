@@ -2,6 +2,7 @@ foundry-local-sdk
 numpy
 pypdf
 streamlit
+chardet
 
 # Development / Testing
 pytest
