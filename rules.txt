@@ -1,0 +1,250 @@
+Tek Bir Makaleyle Kurumsal Ölçekte Sağlam Bir RAG Kurma Kılavuzu
+
+Niyet ettik RAG yapmaya.
+
+Cümle komik gelebilir ama gerçek hayatta çoğu proje böyle başlıyor: Elimizde doküman var, bir LLM var, hadi bunları konuşturalım.
+
+Bu yazıda RAG’i bir kavram olarak anlatmayacağım. Birlikte bir RAG mimarisi kuracağız.
+
+Hedefimiz şu: Bu yazıyı okuyan biri, daha önce RAG kurmamış olsa bile; hangi kararlar gerçekten kritiktir, nerelerde sistem sessizce bozulur, hangi adımlar “sonradan düzeltiriz” denecek kadar küçük değildir.
+
+Başlamadan şunu netleştirelim: RAG’in kalitesi, büyük ölçüde modelden değil bilgi hattından gelir. Yani asıl işimiz LLM seçmek değil; bilgiye düzgün bir yol çizmek.
+
+Press enter or click to view image in full size
+
+0) Başlamadan: “Bu RAG Ne İçin Var?” Sorusu
+Bir RAG sistemi kurarken asıl tasarım sorusu “hangi araç” değildir. Asıl tasarım sorusu “hangi problem”dir. Çünkü RAG, aynı teknolojiyle farklı ihtiyaçlara hizmet edebilir ama her ihtiyaç aynı mimariyi kaldırmaz. Örneğin bir insan kaynakları prosedürü arıyorsanız, doğru cevap çoğu zaman tek bir paragraftır. Bir hukuk metninde ise “doğru cevabı” tek paragraf diye düşünmek hata olabilir; kullanıcıya bağlam, istisna ve dayanak birlikte verilmelidir.
+
+Bu yüzden bu aşamada yapılması gereken ilk şey, RAG’i teknik olarak kurmaya çalışmak değil; cevap üretmesini istediğiniz soru tiplerini bilinçli şekilde sınırlamaktır. Pratikte bu şu anlama gelir: Kurum içinde gerçekten sorulan sorulardan bir liste çıkarırsınız. Bu liste teorik olmaz; bugün insanlara sorulan, mail atılan, Slack’te yazılan, toplantıda tekrar edilen sorular olur.
+
+Bu sorulara baktığınızda genelde iki desen ortaya çıkar. Bazı sorular “nasıl yapılır?” türündedir. Kullanıcı hızlıca bir adım görmek ister. Bazıları ise “hangi kural geçerli?” türündedir ve burada tek cümlelik cevaplar çoğu zaman yanıltıcıdır. Bu ayrımı netleştirmeden RAG kurmaya başlarsanız, sistem bazı konularda iyi çalışırken bazı konularda sessizce güven kaybettirir.
+
+Burada otomasyon kelimesi genelde yanlış anlaşılır. Bu aşamada otomasyon, kod yazmak değildir. Otomasyon, aynı soruyu herkesin kafasında aynı şekilde sınıflandırabilmesidir. Bunun için en pratik yol, basit bir tabloyla ilerlemektir: soru, beklenen cevap türü (kısa yönlendirme mi, detaylı açıklama mı), cevapta kaynak zorunlu mu, emin değilse susmalı mı?
+
+Bu çalışmayı doğru yaptığınızı şuradan anlarsınız: Aynı soruyu farklı ekiplerden iki kişi okuduğunda, “bu soru RAG’e uygun mu?” sorusuna benzer cevaplar veriyorlarsa, sınırlar doğru çizilmiştir. Eğer biri “bunu RAG cevaplamalı” derken diğeri “bunu insan cevaplamalı” diyorsa, problem RAG’te değil; kapsam tanımındadır.
+
+Örneğin kullanıcılar ne soracak?
+
+İç süreçler (izin, masraf, satınalma, talep süreçleri),
+ürün/destek bilgisi (kılavuz, prosedür, ekran yönlendirme),
+teknik dokümantasyon (API, mimari, standartlar),
+hukuki metinler (sözleşme maddeleri, politikalar).
+Bu ayrım önemlidir çünkü bir satınalma prosedürü ile bir sözleşme metninin “doğru cevap” beklentisi aynı değildir. Retrieval stratejisinden, metin işleme kurallarına kadar her şey bu beklentiye göre şekillenir. Bu sorular, ileride seçeceğiniz chunking stratejisinden retrieval ayarlarına kadar tüm hattı etkiler. RAG’i iyi yapan şey, en başta bu sınırların bilinçli şekilde çizilmesidir.
+
+Bu adım bittiğinde elinde ne olmalı?
+Hangi soru tiplerine cevap verecek, hangi konularda temkinli olacak ve hangi durumlarda susacak bir RAG tanımı; yani kapsamı net, beklentisi belli bir problem alanı.
+
+1) Bilgi Envanteri: “Ne Var?” Değil, “Ne İşe Yarar?”
+RAG’in ilk gerçek adımı doküman toplamaktır ama burada yapılan en yaygın hata, bu işi bir tür arşivleme faaliyeti gibi görmektir. Oysa RAG arşiv değildir. RAG, cevap üretmek üzere seçilmiş bilginin indeksidir. Bu ayrım baştan netleşmezse, sistem teknik olarak çalışır ama güven üretmez.
+
+Bu aşamada yapılması gereken şey, mümkün olan her dokümanı sisteme almak değil; hangi bilginin konuşma hakkı olduğunu bilinçli şekilde belirlemektir. Kurumsal dünyada dokümanlar genelde üç sınıfa ayrılır ve bu ayrım yapılmadan RAG kurmak çoğu zaman sessiz bir güven kaybıyla sonuçlanır.
+
+Birinci sınıf, “tek doğru kaynak” dediğimiz içeriklerdir. Politika, prosedür, resmi kılavuz, yönetmelik gibi dokümanlar bu gruba girer. Bu içeriklerin ortak özelliği, kurum içinde “bunu esas alırız” denilen bir sahipliğe sahip olmalarıdır. Eğer bir dokümanın güncelliğinden kimsenin sorumlu olmadığı, değiştiğinde kimin güncelleyeceğinin belli olmadığı bir ortamdaysanız, o dokümanı RAG’e almanız sistemin güvenilirliğini doğrudan riske atar. Çünkü RAG, bu dokümanı konuşurken onun artık geçerli olup olmadığını bilemez.
+
+İkinci sınıf, destekleyici içeriklerdir. Sunumlar, onboarding dokümanları, örnekler ve açıklayıcı notlar bu gruptadır. Bunlar RAG için değerlidir; çünkü kullanıcıya bağlam kazandırır. Ama burada yapılması gereken şey, bu içeriklerin ana kaynakla aynı ağırlıkta ele alınmamasıdır. Destekleyici içerik, doğru kaynağın yerini tutmaz; onu açıklar. Bu fark sistemde tanımlanmazsa, RAG zaman zaman sunumdan öğrendiği bir bilgiyi prosedür gibi sunabilir.
+
+Üçüncü sınıf ise arşivdir. Eski sürümler, kapanmış süreçler, önceki yılın duyuruları. Bunları tamamen dışarıda bırakmak her zaman mümkün değildir; bazı kurumlar “geçmişte neydi?” sorusuna da cevap vermek ister. Ama bu noktada yapılması gereken şey, bu içeriklerin sistem içinde açıkça işaretlenmesidir. Eğer bir doküman arşivse, RAG bunu güncel bir kural gibi sunmamalıdır. Bu ayrım yapılmadığında senaryo genelde aynıdır: RAG eski prosedürü getirir, model bunu düzgünce anlatır, kullanıcı uygulamaya kalkar ve sistem bir daha güven kazanamaz.
+
+Bu adımı sistematik hale getirmenin pratik yolu, dokümanları tek tek okumak değil; sahiplik ve kullanım amacı üzerinden etiketlemektir. “Bu doküman karar verdirir mi?”, “Bu sadece açıklar mı?”, “Bu artık tarihsel mi?” gibi sorular, teknik olmayan ama mimari açıdan kritik sorulardır. Bu sınıflandırma ilk başta manuel yapılabilir; önemli olan kurallarının net olmasıdır.
+
+Doğru yapıp yapmadığınızı şu soruyla anlayabilirsiniz: Aynı konuda iki doküman varsa, RAG hangisini önce getirmeli sorusuna net bir cevabınız var mı? Eğer bu soruya tereddütsüz cevap veremiyorsanız, sistem ileride yanlış bağlamı öne çıkaracaktır.
+
+Bu bölümde hedef şudur: RAG’e girecek dokümanları “kalabalık olsun” diye değil, doğruluk ve sorumluluk üretmesi için seçmek.
+
+Bu adım bittiğinde elinde ne olmalı?
+RAG’e giren her dokümanın rolünün belli olduğu, hangisinin “esas”, hangisinin “destek”, hangisinin “arşiv” olduğunu açıkça tanımlayan bir bilgi envanteri.
+
+2) Doküman Temizleme: RAG’in Görünmeyen Temeli
+Şimdi gerçek iş başlıyor: doküman temizliği. Bu aşama genelde küçümsenir, hatta çoğu projede “sonra bakarız” diye geçilir. Oysa RAG’in doğru çalışıp çalışmayacağı çoğu zaman burada belirlenir.
+
+Diyelim ki bir PDF içinde aynı başlık üç kez geçiyor çünkü sayfa header’ı her sayfada tekrar ediyor. Siz bunu temizlemezseniz, embedding aşamasında bu tekrar eden metinler “en güçlü sinyal” haline gelir. Çünkü embedding modelleri için sık tekrar edilen metin, semantik olarak önemliymiş gibi algılanır. Soru geldiğinde sistem bu header’ı sürekli yukarı çeker. Teknik olarak sonuç vardır, skor yüksektir; ama içerik alakasızdır.
+
+Ya da dokümanda “İçindekiler” bölümü vardır. İnsan için çok faydalı olan bu bölüm, RAG için çoğu zaman saf gürültüdür. Çünkü içerik tablosu, kullanıcı sorularına doğrudan cevap olabilecek bilgi taşımaz; ama embedding uzayında birçok başlığı bir arada barındırdığı için yanlış eşleşmelere yol açar.
+
+Bu noktada yapılması gereken şey çok nettir: kullanıcının hiçbir koşulda cevabını bu metinden alamayacağı kısımları ayıklamak. Buradaki amaç metni kısaltmak değil, anlamı temizlemektir.
+
+Pratikte temizlikte en sık ayıklanan şeyler şunlardır:
+
+header ve footer tekrarları,
+içerik tabloları,
+sayfa numaraları ve baskı izleri,
+kopyalanmış menüler veya navigasyon metinleri,
+“bu doküman taslaktır”, “gizlidir” gibi her sayfada tekrar eden kalıp uyarılar.
+Bu işlemi nasıl otomatikleştireceğiniz sorusu burada önem kazanır. İlk versiyon için mükemmel bir sistem kurmak zorunda değilsiniz. Çoğu ekip, metne dönüştürülmüş dokümanlarda en sık tekrar eden satırları bularak başlar. Regex kurallarıyla veya basit frekans analizleriyle header/footer desenlerini ayıklamak, beklenenden çok daha büyük bir kalite artışı sağlar. Burada amaç %100 temizlik değil; en baskın gürültüyü susturmaktır.
+
+Doğru yolda olup olmadığınızı anlamanın pratik bir yolu vardır: Temizleme sonrası embedding aldığınız metinlerde en sık geçen kelimelere bakın. Eğer kurum adı, gizlilik ibaresi, sayfa bilgisi gibi şeyler hâlâ üst sıralardaysa, temizlik yetersizdir. Buna karşılık süreç isimleri, kural tanımları ve iş terimleri öne çıkıyorsa, doğru yöndesiniz.
+
+Bu aşama sıkıcıdır çünkü gözle görülür bir çıktı üretmez. Ama RAG projelerinde “neden saçma şeyler getiriyor?” sorusunun cevabı çok büyük oranda burada yatar. Temizlik iyi yapılmadığında retrieval ne kadar iyi olursa olsun, aradığı şeyi gürültünün içinden seçmeye çalışır.
+
+Temizlik sıkıcıdır ama RAG’in kalitesi burada doğar.
+
+Bu adım bittiğinde elinde ne olmalı?
+Kullanıcı sorularına cevap olma ihtimali olmayan metinlerden arındırılmış, embedding için anlamı öne çıkan temiz içerik.
+
+3) Doküman Zenginleştirme: RAG’in “Arama” Tarafını Güçlendirmek
+Temizlikten sonra sıra zenginleştirmeye geliyor. Bu aşamada çoğu kişi “metin zaten var, neden zenginleştireyim?” diye düşünür. Çünkü zenginleştirmenin modelin verdiği cevabı doğrudan değiştirdiği sanılır. Oysa zenginleştirme, modelden önceki ve çoğu zaman daha kritik bir noktayı iyileştirir: doğru parçayı bulma ihtimalini.
+
+RAG’de modelin başarısı, getirilen bağlama bağlıysa; bağlamın doğruluğu da büyük ölçüde retrieval kalitesine bağlıdır. Retrieval ise yalnızca metnin kendisine bakmaz. Metnin etrafında taşıdığı yapısal ipuçlarına da bakar. Bu ipuçları yoksa sistem “yakın” olanı bulur ama “doğru” olanı bulmakta zorlanır.
+
+Bu yüzden yapılması gereken şey, her metin parçasını çıplak bırakmamak; onu nereden geldiğiyle birlikte taşımaktır. Doküman adı, bölüm başlığı, ait olduğu departman veya domain, geçerlilik tarihi ya da versiyon bilgisi, erişim seviyesi, mümkünse orijinal kaynağın linki gibi bilgiler burada büyük fark yaratır. Bu bilgiler modele “bunu söyle” demez; arama katmanına “buraya bak” der.
+
+Bu süreci otomatikleştirmenin yolu genelde sandığınızdan daha basittir. Çoğu zaman dokümanın bulunduğu klasör yapısı, dosya adı veya yayınlandığı sistem zaten bu bilgilerin bir kısmını taşır. Örneğin SharePoint’te “Satınalma/Prosedürler” altında duran bir dosyanın domain’i bellidir. Bu bilgiyi metnin içine gömmek yerine, meta olarak saklamak yeterlidir. İlk aşamada her şeyi mükemmel yapmak zorunda değilsiniz; önemli olan bu bilgilerin tutarlı şekilde eklenmesidir.
+
+Zenginleştirmenin sağladığı ilk fayda filtrelemedir. Kullanıcı “satınalma” diye sorduğunda, insan kaynakları dokümanlarının daha en baştan elenebilmesi, arama kalitesini dramatik biçimde artırır. İkinci fayda ise ayrıştırmadır. “Onay” kelimesi neredeyse her kurumsal dokümanda geçer. Ama “hangi onay?” sorusunun cevabı çoğu zaman metnin kendisinde değil, metnin bağlamında saklıdır. Bu bağlam meta bilgilerle gelir.
+
+Doğru yaptığınızı anlamanın pratik bir yolu şudur: Aynı kelimeyi içeren ama farklı domain’lere ait dokümanlar varken, sistem soruya göre doğru domain’i öne çıkarabiliyor mu? Eğer “satınalma onayı” sorusunda İK süreçleri hâlâ üst sıralarda geliyorsa, zenginleştirme yetersizdir. Buna karşılık doğru domain sürekli öne çıkıyorsa, arama tarafı güçlenmiştir.
+
+Zenginleştirme yapılmadığında sistem genelde “yakın metni” bulur ama “doğru bağlamı” yakalayamaz. Bu da kurumsal RAG’lerde sık görülen şu hissi üretir: “Bir şeyler buluyor ama tam da aradığım şey değil.” Bu hissin kaynağı çoğu zaman model değil; metnin bağlamsız bırakılmış olmasıdır.
+
+Bu adım bittiğinde elinde ne olmalı?
+Her parçası yalnızca metin değil, ait olduğu bağlamı da taşıyan; filtrelenebilir, ayrıştırılabilir ve arama sırasında yönlendirici ipuçları barındıran zenginleştirilmiş içerikler.
+
+4) Metne Dönüşüm: Metin Çıkarmak Yetmez, Anlamı Taşımak Gerekir
+Bu aşama çoğu projede “parser çalıştırdık” denilerek hızla geçilir. PDF’ten metin alınır, Word dosyası düz string’e çevrilir ve konu kapatılır. Oysa kurumsal dokümanların önemli bir kısmı saf metinden değil, yapıdan oluşur. Metnin kendisi çoğu zaman yalnızca bu yapıyı işaret eder.
+
+Bir prosedürü düşünün: adımlar ekran görüntüleriyle anlatılıyor. Metin, “yukarıdaki ekranda”, “okla gösterilen alandan” gibi ifadelerle görseli referans alıyor. Siz yalnızca metni alıp görsel içeriği tamamen yok sayarsanız, dokümanın en kritik kısmı RAG’e hiç girmemiş olur. Kullanıcı “bu işlem nereden yapılır?” diye sorduğunda retrieval doğru dokümanı getirir ama modelin önündeki bağlam eksiktir. Model düzgün konuşur ama somut yönlendirme veremez.
+
+Aynı problem tablolar için de geçerlidir. Kurallar, istisnalar ve koşula bağlı farklılıklar çoğu zaman tablo halinde anlatılır. Örneğin bir sütunda “çalışan tipi”, diğerinde “izin hakkı” vardır. Tabloyu düz metne çevirirken bu satır–sütun ilişkisini kaybederseniz, geriye anlamsız bir kelime yığını kalır. “Ofis”, “Saha”, “Var”, “Yok” gibi kelimeler embedding uzayında dolaşır ama hangi koşulda hangi sonucun geçerli olduğu bilgisi kaybolur. Modelin önüne gelen bağlamda ilişki kalmadığı için cevaplar eksik ya da yanlış olur.
+
+Bu aşamada yapılması gereken şey, metni yalnızca çıkarmak değil; anlamı temsil edebilir hale getirmektir. Pratikte bu, bazı içerikler için ek adımlar anlamına gelir. Görsellerde anlatılan akışlar varsa, bu akışın metinsel karşılığını üretmek gerekir. Bu her zaman otomatik olmak zorunda değildir; kritik ekranlar için kısa açıklayıcı metinler bile RAG’in kalitesini ciddi şekilde artırır. Tablolar içinse satır–sütun ilişkisini koruyan bir düzleştirme yaklaşımı gerekir: “Eğer koşul X ise sonuç Y” gibi.
+
+Bu sürecin otomatikleştirilmesi çoğu ekipte kademeli olur. İlk aşamada tüm görselleri kusursuz şekilde metne çevirmek hedeflenmez. Önce şu soru sorulur: “Bu dokümanda görsel veya tablo olmazsa anlam kopuyor mu?” Eğer kopuyorsa, o içerik özel muamele ister. Bu yaklaşım, sizi gereksiz yere her PDF’i OCR cennetine çevirmekten kurtarır.
+
+Doğru yapıp yapmadığınızı anlamanın pratik bir yolu vardır: Metne dönüştürülmüş içeriği, dokümanı hiç görmemiş birine okutun. Eğer “burada ne anlatılıyor?” sorusuna ek açıklama yapmadan cevap verebiliyorsa, RAG de bu içeriği kullanabilir. Eğer kişi sürekli “burada bir tablo vardı galiba” veya “hangi ekrandan bahsediyor?” diyorsa, metne dönüşüm yetersizdir.
+
+Bu yüzden metne dönüşüm aşaması, “string çıkarma” değil; yapıyı koruyarak temsil etme aşamasıdır. Gerekirse tabloları ilişkisel şekilde düzleştirmek, gerekirse görsel bilgiyi açıklayıcı metne çevirmek gerekir. Bu zahmetli görünür ama çoğu RAG projesinde “neden eksik cevap veriyor?” sorusunun cevabı tam olarak buradadır.
+
+Get Baris Akdas’s stories in your inbox
+Join Medium for free to get updates from this writer.
+
+Enter your email
+Subscribe
+
+Remember me for faster sign in
+
+Bu adım bittiğinde elinde ne olmalı?
+Görseli, tabloyu veya orijinal formatı görmeden de anlamını koruyan; RAG’in bağlam olarak kullanabileceği, eksik referanslar içermeyen metinler.
+
+5) Chunking: Parça Boyutu Değil, Bağlam Bütünlüğü
+Şimdi dokümanları parçalara bölüyoruz. Bu, RAG’in en kritik adımlarından biridir; çünkü burada verdiğiniz karar, sistemin bilgiye nasıl “baktığını” doğrudan belirler. Chunking çoğu zaman teknik bir detay gibi ele alınır, ama gerçekte bu adım bilginin nasıl paketlendiğini tanımlar.
+
+Sabit 1000 karakterle kesmek hızlıdır ama risklidir. Çünkü kurumsal metinlerde anlam çoğu zaman tek bir paragrafta bitmez. Başlıkla başlar, altındaki birkaç paragrafla gelişir ve çoğu zaman sonunda bir istisna ya da önemli bir notla tamamlanır. Sabit kesme bu parçaları birbirinden koparır. Teknik olarak her şey çalışır; ama anlam parçalanır.
+
+Bu noktada yapılması gereken şey, “kaç karakter?” sorusunu sormak değil; “bu bilgi tek başına anlamlı mı?” sorusunu sormaktır. Bir parça tek başına getirildiğinde, kullanıcıya veya modele “bu neyin parçasıydı?” dedirtmemelidir. Eğer bir parçayı okurken sürekli üst başlığı, önceki adımı veya sonraki istisnayı arama ihtiyacı doğuyorsa, chunking yanlış yapılmıştır.
+
+Pratikte bu yüzden yapısal chunking yaklaşımı kullanılır. Başlıklara göre bölmek, bir sürecin adımlarını mümkün olduğunca birlikte tutmak, istisnayı bağlı olduğu kuraldan koparmamak bu yaklaşımın temelidir. Burada amaç, her parçanın kendi içinde küçük ama tamamlanmış bir anlam taşımasıdır. Bu bazen daha büyük chunk’lar, bazen de bilinçli overlap’ler anlamına gelir; önemli olan bağlamın kopmamasıdır.
+
+Bu adımı otomatikleştirmek genelde kademeli olur. İlk aşamada kusursuz bir chunking sistemi kurmak zorunda değilsiniz. Ama en azından başlıkları tanıyabilen, adım numaralarını ayırt edebilen ve istisna ifadelerini algılayabilen basit kurallar bile ciddi fark yaratır. Tam otomasyon, gerçek kullanıcı soruları geldikçe ve hangi parçaların yarım kaldığı görüldükçe gelişir.
+
+Doğru yapıp yapmadığınızı anlamanın pratik bir yolu vardır: Retrieval’dan gelen tek bir parçayı alıp, hiçbir ek bağlam vermeden okuyun. Eğer bu parça “evet, burada bir şey anlatılıyor ve ne olduğu belli” hissi veriyorsa, doğru yoldasınız. Ama “burada bir şey eksik” duygusu oluşuyorsa, sistem de aynı eksikliği yaşayacaktır.
+
+Eğer chunking yanlışsa, retrieval doğru yerden çekiyor gibi görünür ama bağlam yarım gelir. Model de yarım bağlamla yarım cevap üretir. Kullanıcı cevabı okur, “demek bu kadar” sanır; ama işi uygulamaya çalıştığında duvara toslayabilir. Bu tür hatalar hemen fark edilmez; çünkü sistem cevap üretmiştir. Ama güven kaybı tam olarak burada başlar.
+
+Bu adım bittiğinde elinde ne olmalı?
+Tek başına getirildiğinde anlamını koruyan, bağlı olduğu kuralı veya süreci içinde taşıyan; yarım cümle hissi vermeyen bilgi parçaları.
+
+6) Embedding Modeli Seçimi: “En Popüler” Değil, “En Uyumlu”
+Şimdi vektörleme aşaması geliyor. Burada en büyük yanılgı şudur: embedding embedding’dir. Oysa değil. Embedding seçimi, RAG’in arama kalitesini “ince ayar” olarak değil, çoğu zaman “temel kader” olarak belirler.
+
+Kurumsal metin Türkçe ise ve kurum jargonuyla doluysa, embedding modelinin bu dili ve bu terminolojiyi iyi temsil etmesi gerekir. Aksi halde semantik yakınlık beklediğiniz şekilde çalışmaz. Buradaki sorun genelde şurada kendini belli eder: sistem bir şey getirir ama hep biraz alakasız gelir. Model soruyu anlamış gibidir ama cevap yanlış bağlamdan gelir. Bu durumda insanlar refleks olarak LLM’i suçlar. “Model anlamıyor” denir. Oysa modelin eline gelen bağlam yanlıştır; model sadece düzgünce yanlış konuşuyordur. Yani sorun çoğunlukla embedding + retrieval hattındadır.
+
+Bu aşamada yapılması gereken şey “hangi model daha popüler?” diye bakmak değil; kendi kurumunuzun diliyle modelin uyumunu test etmektir. Kurum jargonunun en büyük tuzağı şudur: İnsanlar aynı kavramı kısaltmalarla, ekran kodlarıyla, ürün içi isimlerle veya departman içi jargonla ifade eder. Eğer embedding modeli bu ifadeleri iyi temsil etmiyorsa, soruyla doğru içerik birbirini “yakın” göremez.
+
+Bu yüzden embedding seçimini doğru yapmak için küçük bir doğrulama seti şarttır. Burada “küçük” kelimesi önemlidir; aylarca veri üretmeye gerek yoktur. 10–20 gerçek kullanıcı sorusu seçin. Bu soruların doğru cevabının hangi doküman parçasında olduğunu siz bilin. Sonra retrieval’ı çalıştırın ve şu soruyu sorun: Sistem doğru parçayı gerçekten getiriyor mu?
+
+Bu süreci otomatikleştirmek zor değildir. Bu doğrulama setini bir defa hazırladığınızda, embedding modelini değiştirdiğinizde veya chunking stratejisini revize ettiğinizde aynı soruları tekrar koşarsınız. Böylece seçimlerinizin etkisini “hissetmek” yerine ölçersiniz. RAG projelerinde en büyük zaman kaybı, ölçmeden iyileştirmeye çalışmaktır.
+
+Doğru yolda olup olmadığınızı şu işaretlerden anlarsınız: Soruların bir kısmında sistem hep “yakın ama değil” içerikler getiriyorsa, özellikle kısaltmaların ve kurum içi isimlerin geçtiği sorularda sapma varsa, embedding modeliniz ya da metnin temsili zayıftır. Böyle bir durumda LLM’i büyütmek veya prompt’u değiştirmek neredeyse hiçbir şeyi düzeltmez. Önce embedding ve chunking kararlarına dönmek gerekir.
+
+Embedding seçiminde amaç şudur: “en iyi model”i bulmak değil; sizin dokümanlarınızı ve sizin kullanıcı dilinizi en iyi temsil eden hattı bulmak. Bu bir kez doğru oturduğunda, retrieval katmanı çok daha tutarlı çalışır ve modelin doğruluğu doğal olarak yükselir.
+
+Bu adım bittiğinde elinde ne olmalı?
+Kurumunuzun gerçek kullanıcı sorularında doğru bağlamı tutarlı şekilde getirebilen; küçük bir doğrulama setiyle düzenli ölçülebilen bir embedding + retrieval uyumu.
+
+7) Vektörleri Nerede Tutacağız?
+Vector DB mi, Arama Servisi mi?
+
+Bu adım genelde “hangi ürünü seçelim?” diye konuşulur. Oysa bu soruyla başlamak çoğu zaman yanlış yere götürür. Daha doğru soru şudur: benim arama ihtiyaçlarım ne? Çünkü RAG’de depolama katmanı yalnızca vektörlerin durduğu bir yer değildir; sistemin nasıl arama yapacağını, neyi öne çıkaracağını ve neyi eleyebileceğini belirler.
+
+Kurumsal RAG’de yalnızca semantik yakınlık çoğu zaman yeterli olmaz. Kullanıcı “satınalma” diye sorduğunda insan kaynakları dokümanlarının baştan elenmesini istersiniz. Bazı içeriklerin yalnızca belirli roller tarafından görülmesi gerekir. Bazı cevaplarda yalnızca güncel versiyonların dikkate alınması zorunludur. Bu tür ihtiyaçlar devreye girdiğinde, arama katmanı yalnızca “en yakın vektörü bul” demekten çok daha fazlasını yapmak zorunda kalır.
+
+Burada pratikte iki ana yol vardır. Yönetilen arama servisleri, kurumsal senaryolarda güçlüdür; çünkü sadece vektör tutmazlar. Keyword aramasıyla semantik aramayı birlikte kullanma (hybrid search), domain veya tarih bazlı filtreleme, skor profilleriyle önceliklendirme, reranking gibi yetenekleri hazır olarak sunarlar. Bu da RAG’in arama kalitesini şekillendiren kararları tek bir katmanda verebilmenizi sağlar. Özellikle farklı ekiplerin, farklı erişim seviyelerinin ve farklı doküman türlerinin olduğu ortamlarda bu tür servisler ciddi operasyonel kolaylık sağlar.
+
+Vector DB tarafı ise daha esnek ve daha kontrol edilebilirdir. Arama davranışını tamamen kendiniz tasarlamak, özel benzerlik ölçümleri kullanmak veya çok spesifik senaryoları optimize etmek istediğinizde avantajlı olabilir. Ancak burada çoğu zaman gözden kaçan bir gerçek vardır: Bu esneklik, aynı zamanda sorumluluk demektir. Filtreleme, hybrid arama, erişim kontrolü, skor ayarlamaları gibi konuların önemli bir kısmını sizin inşa etmeniz gerekir. Kurumsal ölçekte bu, ek geliştirme ve bakım yükü anlamına gelir.
+
+Bu aşamada yapılması gereken şey, teknik karşılaştırma tablosu çıkarmak değil; gelecekte neye ihtiyaç duyacağınızı dürüstçe düşünmektir. Bugün sadece basit soru–cevap yapıyor olabilirsiniz. Ama yarın “bu dokümanları sadece şu ekip görsün”, “şu tarihten eski olanlar gelmesin”, “bu anahtar kelime geçtiğinde özellikle öne çıksın” gibi talepler geldiğinde mimariniz buna ne kadar hazır olacak?
+
+Doğru yolda olup olmadığınızı şuradan anlarsınız: Bir yıl sonra arama davranışını değiştirmek istediğinizde, sistemi baştan yazmanız gerekmiyorsa doğru seçim yapmışsınızdır. Eğer her yeni ihtiyaç “keşke başta farklı seçseydik” dedirtiyorsa, seçim yalnızca bugünü düşünerek yapılmış demektir.
+
+Bu noktada tekrar altını çizmek gerekir: Burada “en iyi” yoktur. Şirketin teknik olgunluğu, ekip yapısı ve arama beklentileri vardır. Doğru seçim, bu ihtiyaçlarla uyumlu olandır.
+
+Bu adım bittiğinde elinde ne olmalı?
+Filtreleme, sıralama ve erişim ihtiyaçlarını karşılayabilecek; arama davranışını zamanla evriltmeye izin veren bir vektör depolama ve arama katmanı.
+
+8) Retrieval Tasarımı: RAG’in Kalbi
+Retrieval, sistemin “bulma” kısmıdır. Ve RAG’in çoğu başarısızlığı burada görünür hale gelir. Çünkü RAG’in çıktısı, çoğu zaman modelin “ne kadar iyi konuştuğu” ile değil; modelin önüne hangi parçaların geldiğiyle belirlenir.
+
+Bu noktada asıl hedef, doğru parçayı bulmak değil; doğru parçayı doğru sırayla ve doğru miktarda bulmaktır. Çok az parça getirirseniz bağlam eksik kalır. Model iyi niyetle tamamlamaya çalışır ve eksik bağlamı tahminle doldurur. Bu da güveni zedeleyen, “düzgünce yanlış” cevapların en klasik kaynağıdır. Çok fazla parça getirirseniz bu sefer de model gereksiz gürültü içinde boğulur; önemli bilgi kaybolur, cevaplar uzar, odak dağılır veya çelişkili parçalar aynı anda bağlama girer.
+
+Bu aşamada yapılması gereken şey, retrieval’ı “varsayılan ayarlarla” çalıştırmak değil; kullanıcı davranışına göre tasarlamaktır. Kurumsal sistemlerde çoğu zaman hybrid search gerekir: kelime bazlı + semantik. Çünkü kullanıcı bazen çok spesifik bir ifade yazar. Ekran kodu, prosedür adı, form numarası, iç sistemlerde kullanılan bir kısaltma… Bu tür sinyalleri keyword arama çoğu zaman semantik aramadan daha net yakalar. Semantik arama ise kullanıcı aynı şeyi farklı kelimelerle anlattığında devreye girer. Bu ikisini birlikte kullanmak, kurum içi aramalarda genellikle daha tutarlı sonuç üretir.
+
+Burada sistematik ilerlemek, deneme-yanılmayı ölçülebilir hale getirmek anlamına gelir. Küçük bir doğrulama setiyle retrieval’u koştuğunuzda sadece “doğru parça geldi mi?” sorusuna bakmak yetmez; kaçıncı sırada geldi sorusuna da bakmanız gerekir. Çünkü bir parça 10. sırada geliyorsa, pratikte çoğu konfigürasyon onu zaten LLM’e taşımayacaktır. Bu yüzden retrieval kalitesi, “bulabiliyor mu?” değil, “ilk N içinde bulabiliyor mu?” ile ölçülür.
+
+Bir de reranking konusu var. İlk arama sonuçları her zaman en iyi sırada değildir. Reranking, “bulduklarımı daha akıllı sırala” katmanıdır. Bu yapılmadığında sistem semantik olarak güçlü ama güncel olmayan bir parçayı üste taşıyabilir. Kullanıcı “şu an geçerli kural ne?” diye sorar, sistem iki yıl önceki versiyonu en üste getirir, model de bunu gayet düzgün anlatır. Yanlış olduğu anlaşılması zor bir hata türüdür, çünkü cevap akıcıdır; sadece gerçekte geçerli değildir.
+
+Bu adımı otomatikleştirmek, tek seferlik bir ayar yapmak demek değildir. Retrieval tasarımı çoğu ekipte zamanla olgunlaşır. İlk başta makul bir top-k ile başlanır, sonra kullanıcı sorularına ve yanlış cevap örneklerine bakarak artırılır ya da azaltılır. Hybrid sinyallerin ağırlıkları, filtrelerin devreye girme koşulları, reranking’in hangi senaryolarda zorunlu olduğu adım adım netleşir. Buradaki asıl otomasyon, bu değişiklikleri “hisle” değil; küçük test setleri ve loglarla ölçerek yapabilmektir.
+
+Doğru yolda olup olmadığınızı en net şuradan anlarsınız: Kullanıcıların “bazen çok alakasız şeyler getiriyor” dediği anlarda, retrieval loglarına baktığınızda gerçekten alakasız parçaların üst sıralarda geldiğini görebiliyor musunuz? Eğer görüyorsanız, problem görünür hale gelmiştir ve düzeltilebilir. Eğer loglarınız retrieval kararlarını şeffaf göstermiyorsa, sistem yanlış yaparken bile neden yanlış yaptığını anlayamazsınız.
+
+Retrieval doğru değilse, LLM her zaman düzgünce yanlış cevap üretir. Bu yüzden retrieval, RAG’in kalbidir; çünkü modelin ne söyleyeceğini değil, neyi görerek söyleyeceğini belirler.
+
+Bu adım bittiğinde elinde ne olmalı?
+Kurum jargonunu ve kullanıcı davranışını dikkate alan; hybrid arama ve gerektiğinde reranking ile doğru parçaları ilk sıralara taşıyabilen, “kaç parça getiriyorum ve neden?” sorusuna loglarla cevap verebildiğiniz bir retrieval hattı.
+
+9) Prompt ve Üretim: Modelin Sınırlarını Yönetmek
+Bu noktada LLM’e bağlamı verirsiniz. Burada amaç “güzel cevap” değildir. Amaç güvenilir cevap. Çünkü kurumsal kullanımda kullanıcı çoğu zaman bir şeyi merak ettiği için değil, bir işi tamamlamak için sorar. Bu yüzden yanlış ama akıcı bir cevap, hiçbir cevap olmamasından daha tehlikelidir.
+
+Bu aşamada yapılması gereken şey, modelden “daha iyi yazmasını” istemek değil; modelin davranış sınırlarını netleştirmektir. İyi bir RAG sistemi şu davranışları sergilemelidir: kaynak yoksa uydurmamak. Eksikse soru sormak. Cevabı dayandırdığı yerleri işaret etmek. Bunlar prompt ile başlar ama tek başına prompt yetmez. Retrieval ve kaynak kalitesi bozuksa prompt sadece “daha nazik yanlış” üretir.
+
+Prompt tarafında pratikte kritik olan birkaç nokta vardır ve bunlar çoğu zaman ilk projelerde atlanır. Modelin bağlamında hangi metnin “kaynak” olduğu, hangisinin “sistem talimatı” olduğu net değilse, model bazen kendi genel bilgisini kaynak gibi sunar. Bu yüzden prompt içinde modelin yalnızca getirilen bağlamdan konuşacağı, bağlam yeterli değilse bunu açıkça söyleyeceği davranışını net tanımlamak gerekir. Bu, modelin “bilmiyorum” demesini sağlamak kadar, bunu hangi durumda diyeceğini de belirlemek anlamına gelir.
+
+Burada otomasyon dediğimiz şey, prompt’u bir defa yazıp kenara koymak değildir. Otomasyon, prompt’u bir şablona dönüştürmektir: her istek geldiğinde aynı çerçeveyle çalışır, aynı güven kurallarını uygular. Örneğin her cevapta kaynağa referans verme davranışını ya da kaynak gelmediyse kullanıcıdan netleştirici soru sorma davranışını sistematik hale getirdiğinizde, cevapların tutarlılığı artar. Bu tutarlılık kurumsal kullanımda modelin “zekâsından” bile daha değerlidir.
+
+Doğru yolda olup olmadığınızı anlamanın en net yolu, modelin “zor anlarda” nasıl davrandığına bakmaktır. Özellikle retrieval’ın zayıf kaldığı sorularda model halen kendinden emin şekilde cevap üretiyorsa, prompt sınırları yeterince net değildir. Buna karşılık model, “bu bağlamda net bir kaynak bulamadım” diyebiliyor ve gerekirse kullanıcıya doğru soruyu geri sorabiliyorsa, sistem güven üretmeye başlamıştır.
+
+Bir diğer önemli kontrol de şudur: Model cevap verirken gerçekten dayandığı yerleri işaret ediyor mu, yoksa sadece “kaynak varmış gibi” mi konuşuyor? Kaynak gösterimi (parça id’si, doküman adı veya link gibi) modelin uydurmasını tamamen engellemez ama uydurmanın maliyetini artırır; çünkü sistem artık hesap verebilir hale gelir.
+
+Bu yüzden prompt ve üretim katmanında hedef, modelin “çok konuşması” değil; doğru bilgiyle konuşması ve yeterli bilgi yoksa bunu kabul etmesidir. Zaten iyi bir RAG’de kullanıcı güveni, çoğu zaman mükemmel cevaplardan değil; yanlış yapılmadığı için oluşur.
+
+Bu adım bittiğinde elinde ne olmalı?
+Bağlam yoksa uydurmayan, eksikse soru soran, verdiği cevabı açıkça hangi kaynağa dayandırdığını gösterebilen; tutarlı bir prompt şablonu ve güvenilir cevap üretim davranışı.
+
+10) İzleme ve Bakım: RAG’i Yaşatan Şey
+Son adım ama en kritiklerinden biri.
+Çünkü RAG’i kurup bırakmak, sistemin zamanla güven kaybetmesini garanti eder. Bunun sebebi modelin eskimesi değildir. Asıl sebep şudur: kurum bilgisi canlıdır ama RAG çoğu zaman sabit bırakılır.
+
+Dokümanlar güncellenir. Süreçler değişir. İstisnalar eklenir. Yetkiler el değiştirir. Ama embedding deposu, retrieval ayarları ve indeksler aynı kalırsa sistemle kurum arasındaki bağ yavaş yavaş kopar. Bu kopuş da çoğu zaman fark edilmez; çünkü sistem teknik olarak çalışmaya devam eder.
+
+Bu noktada yapılması gereken şey, RAG’i bir “kurulum işi” olarak değil, yaşayan bir ürün olarak ele almaktır. Bu da izleme ve bakım döngüsünü en baştan tasarlamayı gerektirir. “Sonra bakarız” denilen her şey, RAG dünyasında güven kaybı olarak geri döner.
+
+İzleme tarafında ilk yapılması gereken, sistemin ne cevap verdiğini değil, neden o cevabı verdiğini görünür hale getirmektir. Yani her soru için hangi doküman parçalarının getirildiği, hangi sırayla getirildiği ve modelin hangi bağlamdan cevap ürettiği loglanmalıdır. Bu loglar olmadan “yanlış cevap” geri bildirimi soyut kalır; çünkü nerede bozulduğunu göremezsiniz.
+
+İkinci kritik konu kullanıcı geri bildirimi. Kullanıcının “bu yanlış” demesi için teknik bir hata yaşaması gerekmez. Aksine, RAG’de en tehlikeli yanlışlar düzgün görünen yanlışlardır. Bu yüzden kullanıcıya basit ama net bir geri bildirim kanalı vermek gerekir: cevap işe yaradı mı, yaramadı mı; eksik miydi, hatalı mıydı? Bu sinyaller toplanmadığında sistem kendi hatasını asla öğrenemez.
+
+Burada otomasyon devreye girer. En çok sorulan soruların periyodik analizi, sürekli yanlış bağlamdan cevap üreten soruların tespiti, artık güncel olmayan dokümanların otomatik işaretlenmesi gibi mekanizmalar kurulmalıdır. Örneğin bir doküman versiyonu güncellendiğinde, eski versiyona ait embedding’lerin pasif hale getirilmesi ya da yeniden indekslenmesi bir süreç haline getirilmelidir. Aksi halde RAG, geçmişte doğru olan ama bugün yanlış olan bilgiyle konuşmaya devam eder.
+
+Doğru yaptığınızı anlamanın yolu burada nettir: Sistem zamanla daha az kontrol ihtiyacı doğuruyorsa, kullanıcılar cevabı aldıktan sonra “bir de şuraya sorayım” refleksini daha az gösteriyorsa ve yanlış cevaplar belirli kalıplarda tekrar etmiyorsa, bakım döngüsü çalışıyor demektir. Buna karşılık “eskiden daha iyiydi” cümlesi duyulmaya başlandıysa, genelde sorun modelde değil; izleme ve bakımın eksikliğindedir.
+
+RAG’i yaşatan şey model değildir; bakım döngüsüdür. Model değiştirilebilir, embedding güncellenebilir, arama servisi taşınabilir. Ama izleme ve geri besleme yoksa, en iyi mimari bile zamanla çürür.
+
+Bu adım bittiğinde elinde ne olmalı?
+Hangi sorunun hangi bağlamla cevaplandığını görebildiğin, yanlışların kullanıcıdan ve sistemden sinyal olarak geri döndüğü, güncel olmayan bilginin sessizce sistemde kalmadığı; yaşayan, izlenen ve sürekli iyileştirilen bir RAG döngüsü.
+
+Sonuç
+Bu makalenin amacı, RAG’i “kurduk bitti” diye ele alınan bir proje olmaktan çıkarıp, adım adım inşa edilen yaşayan ve sürdürülebilir bir mimariye dönüştürmek.
+
+Burada hedefimiz şuydu: Elindeki dokümanları bir arşiv gibi sisteme yığıp “model konuşsun” demek değil; bilginin envanterinden başlayarak temizleme, zenginleştirme, metne dönüşüm, chunking, embedding, depolama seçimi, retrieval tasarımı, prompt ve üretim disiplinine kadar uzanan hattı birlikte kurmak. Her adımda “ne yapmalıyım, bunu nasıl sistematik hale getiririm, doğru yaptığımı nasıl anlarım?” sorularına cevap vererek, okuyan kişinin kendi kurumunda aynı yolu tekrar edebilmesini sağlamak.
+
+RAG’in en büyük riski “nazik yanlışlar” üretmesidir: akıcı ama eski, eksik ya da yanlış bağlamdan gelen cevaplar. Bu yüzden bu rehber, modelin güzel konuşmasını değil; en doğru, en güvenilir ve en güncel bilgiyi bulmasını merkeze alır. Doğru bağlamı doğru sırayla ve doğru miktarda getiren bir retrieval hattı, kaynağı olmayan yerde uydurmayan bir üretim davranışı ve zamanla eskimeyi engelleyen izleme/bakım döngüsü bu hedefin temelidir.
+
+Sonuç olarak bu yazı, bir RAG sistemi kurmak isteyen ekipler için yalnızca teknik adımların listesi değil; kurumsal ölçekte uygulanabilir bir yol haritası sunar: hangi kararı nerede vermen gerektiğini, hangi hataların sessizce güven kaybettirdiğini ve sistemi zaman içinde nasıl sağlıklı tutacağını gösteren bir kılavuz.
