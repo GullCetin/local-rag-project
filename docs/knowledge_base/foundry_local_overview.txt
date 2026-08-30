@@ -1,0 +1,48 @@
+# Microsoft Foundry Local — Yerel AI Çalışma Zamanı
+
+Microsoft Foundry Local, büyük dil modellerini kullanıcının kendi cihazında çalıştırmaya olanak tanıyan, uçtan uca yerel bir yapay zeka çözümüdür.
+Bulut hesabı veya GPU zorunluluğu olmaksızın güçlü dil modellerini tamamen çevrimdışı çalıştırmanızı sağlar.
+
+## Temel Özellikler
+
+Tamamen çevrimdışı çalışma: Tüm model indirme, yönetme ve çıkarım işlemleri yerel cihazda gerçekleşir.
+Hiçbir ağ çağrısı yapılmaz; internet bağlantısı kesinlikle gerekmez.
+
+Donanım hızlandırma: CPU, GPU ve NPU'yu otomatik olarak algılayarak en uygun çıkarım yapılandırmasını seçer.
+Bu sayede mevcut donanım kapasitesi en verimli şekilde kullanılır.
+
+Model kataloğu: Optimize edilmiş modellerin yer aldığı küratörlü bir katalog sunar.
+Phi-3.5 Mini, Qwen ve diğer küçük ama güçlü modeller bu katalogda yer almaktadır.
+
+Python SDK: foundry-local-sdk paketi, Python uygulamalarından kolayca entegrasyon sağlar.
+OpenAI uyumlu API yapısı sayesinde mevcut kodlarla kolayca entegre edilebilir.
+
+## Python SDK Kullanımı
+
+SDK kurulumu pip ile yapılır: pip install foundry-local-sdk
+
+FoundryLocalManager sınıfı, model yönetiminin merkezi bileşenidir.
+initialize() metodu ile başlatılır, instance özelliği üzerinden erişilir.
+
+Modeller catalog.get_model() ile seçilir.
+is_cached özelliği modelin yerel diskte mevcut olup olmadığını gösterir.
+download() metodu modeli indirir, load() metodu RAM'e yükler.
+
+Chat tamamlama için get_chat_client() kullanılır.
+complete_chat() metodu mesaj listesi alır ve OpenAI formatında yanıt döner.
+
+Embedding oluşturma için get_embedding_client() kullanılır.
+generate_embedding() metodu metin alıp float listesi döner.
+
+## Desteklenen Platformlar
+
+Foundry Local; Windows, macOS ve Linux işletim sistemlerini desteklemektedir.
+Windows üzerinde WinML optimizasyonu için foundry-local-sdk-winml paketi kullanılabilir.
+Her platformda kurulum pip aracılığıyla yapılmaktadır.
+
+## Proje Kapsamındaki Kullanım
+
+Bu projede Foundry Local iki farklı amaçla kullanılmaktadır.
+Birincisi, belgeleri vektöre dönüştürmek için qwen3-embedding-0.6b embedding modelini çalıştırmaktır.
+İkincisi, kullanıcı sorularına yanıt üretmek için phi-3.5-mini sohbet modelini çalıştırmaktır.
+Her iki model de tamamen yerel olarak çalışır; herhangi bir API anahtarı veya ücret gerektirmez.

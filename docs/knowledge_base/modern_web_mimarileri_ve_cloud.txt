@@ -1,0 +1,31 @@
+# Modern Web Mimarileri, Konteynerizasyon ve Bulut Teknolojileri
+
+## Monolitik ve Mikroservis Mimarileri Karşılaştırması
+
+1. Monolitik Mimari: Uygulamanın tüm iş mantığı (User, Order, Payment, Notification) tek bir kod tabanı ve tek bir veritabanı üzerinde çalışır. Başlangıçta geliştirmesi, hata ayıklaması ve deploy edilmesi son derece kolaydır. Ancak sistem büyüdükçe küçük bir değişiklik tüm uygulamanın yeniden derlenmesini ve test edilmesini gerektirir.
+2. Mikroservis Mimarisi: Uygulama, her biri bağımsız olarak deploy edilebilen, kendi veritabanına sahip ve tek bir iş fonksiyonuna odaklanan küçük servisler kümesine bölünür. Servisler arası iletişim REST API, gRPC veya mesaj kuyrukları (RabbitMQ, Kafka) üzerinden gerçekleşir. Yatay ölçeklenebilirlik (Horizontal Scaling) ve teknoloji bağımsızlığı sağlar; ancak dağıtık sistem karmaşıklığı (Distributed Tracing, Network Latency, Data Consistency) getirir.
+
+## Konteynerizasyon ve Docker
+
+Geleneksel Sanal Makineler (VM) donanım katmanını sanallaştırıp her biri için ayrı bir işletim sistemi (Guest OS) çalıştırırken; Docker, işletim sistemi çekirdeğini (Host OS Kernel) paylaşarak uygulamaları izole "konteyner" (container) ortamlarında çalıştırır.
+Docker Container avantajları:
+- Hafiflik: Saniyeler içinde başlar ve çok daha az RAM/CPU tüketir.
+- Taşınabilirlik (Portability): "Benim bilgisayarımda çalışıyordu, sunucuda çalışmıyor" sorununu tamamen ortadan kaldırır.
+- Dockerfile: Uygulamanın ortamını, bağımlılıklarını ve başlangıç komutlarını adım adım tanımlayan deklaratif bir yapılandırma dosyasıdır.
+
+## Kubernetes (K8s) Konteyner Orkestrasyonu
+
+Yüzlerce Docker konteynerinin üretim ortamında yönetimi için Kubernetes endüstri standardıdır.
+Temel Kubernetes Bileşenleri:
+- Pod: Kubernetes'teki en küçük dağıtılabilir birimdir. Bir veya daha fazla konteyneri bir arada barındırır ve aynı ağ alanını (IP) paylaşır.
+- Deployment: Pod'ların istenen sayıda kopyasının (replicas) çalışmasını ve kesintisiz güncelleme (rolling update) yapılmasını sağlar.
+- Service: Dinamik olarak değişen Pod IP'lerinin önüne sabit bir IP ve DNS adı koyarak yük dengeleme (Load Balancing) yapar.
+- Ingress: Küme dışından gelen HTTP/HTTPS trafiğini uygun servislere yönlendiren giriş kapısıdır.
+
+## Önbellekleme (Caching) ve Redis Stratejileri
+
+Veritabanı üzerindeki yükü azaltmak ve milisaniye altı okuma süreleri elde etmek için In-Memory veri yapısı deposu olan Redis kullanılır.
+Popüler Caching Stratejileri:
+- Cache-Aside (Lazy Loading): Uygulama önce veriyi Redis'te arar; varsa (Cache Hit) döner, yoksa (Cache Miss) veritabanından okuyup Redis'e yazar.
+- Write-Through: Veri hem veritabanına hem de önbelleğe aynı anda senkron olarak yazılır.
+- TTL (Time-To-Live): Önbellekteki verinin bayatlamasını önlemek için belirli bir süre sonra otomatik silinmesini sağlayan geçerlilik süresidir.

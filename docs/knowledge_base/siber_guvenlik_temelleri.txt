@@ -1,0 +1,26 @@
+# Siber Güvenlik ve Ağ Savunması Temelleri
+
+## Sıfır Güven (Zero Trust) Mimarisi
+
+Geleneksel ağ güvenliği modellerinde iç ağdaki tüm kullanıcılara ve cihazlara güvenilirken, modern kurumsal savunmada Sıfır Güven (Zero Trust) yaklaşımı esastır. Bu mimarinin temel prensibi "Asla güvenme, her zaman doğrula" (Never trust, always verify) ilkesidir.
+Ağ sınırlarının ötesinde, her erişim isteği kimlik, konum, cihaz sağlığı ve veri duyarlılığı kriterlerine göre dinamik olarak yetkilendirilir. En az ayrıcalık ilkesi (Least Privilege Principle) gereğince kullanıcılara yalnızca görevlerini tamamlamaları için gereken minimum erişim hakkı tanınır.
+
+## Şifreleme Yöntemleri: Simetrik ve Asimetrik Kriptografi
+
+Veri gizliliğini sağlamada iki ana şifreleme yöntemi kullanılır:
+
+1. Simetrik Şifreleme: Hem şifreleme hem de şifre çözme işlemi için tek bir gizli anahtar (secret key) kullanılır. En popüler simetrik algoritma AES (Advanced Encryption Standard)'dir. AES-256, günümüzde bankacılık ve askeri sistemlerde standart olarak tercih edilir ve son derece hızlıdır.
+2. Asimetrik Şifreleme: Biri genel (Public Key), diğeri özel (Private Key) olmak üzere bir anahtar çifti kullanılır. Genel anahtar ile şifrelenen veri yalnızca ilgili özel anahtar ile çözülebilir. RSA ve Eliptik Eğri Kriptografisi (ECC) bu yöntemin en bilinen örnekleridir ve TLS/SSL el sıkışmalarında kimlik doğrulama için kullanılır.
+
+## Sosyal Mühendislik ve Oltalama (Phishing) Saldırıları
+
+Siber saldırıların %80'inden fazlası teknik açıklardan ziyade insan faktörünü hedef alır. Oltalama (Phishing), saldırganların güvenilir bir kurum (banka, e-posta sağlayıcısı, kargo firması) gibi davranarak kullanıcıları sahte bağlantılara tıklatmaya veya hassas parolalarını girmeye ikna etmesidir.
+Spear Phishing ise belirli bir kişiyi veya üst düzey yöneticiyi (Whaling) hedef alan, son derece kişiselleştirilmiş ve tehlikeli bir oltalama türüdür.
+
+## Çok Faktörlü Kimlik Doğrulama (MFA)
+
+Geleneksel kullanıcı adı ve parola kombinasyonları kimlik avı saldırılarına karşı savunmasızdır. Çok faktörlü kimlik doğrulama (MFA), kullanıcının kimliğini doğrulamak için üç temel kategoriden en az ikisini gerektirir:
+- Bildiğiniz bir şey (Knowledge): Parola, PIN kodu veya güvenlik sorusu cevabı.
+- Sahip olduğunuz bir şey (Possession): Akıllı telefon, donanım güvenlik anahtarı (YubiKey) veya SMS onay kodu.
+- Olduğunuz bir şey (Inherence): Parmak izi, yüz tanıma veya retina taraması gibi biyometrik veriler.
+FIDO2 ve WebAuthn protokolleri, SMS tabanlı zayıf doğrulamaların yerine kriptografik donanım anahtarlarını getirerek oturum çalma riskini sıfıra indirir.
