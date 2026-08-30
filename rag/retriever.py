@@ -1,48 +1,50 @@
 """
-rag/retriever.py — Cosine Similarity Tabanlı Chunk Retrieval
-=============================================================
-Bu modül, kullanıcının sorgusunu embed eder ve SQLite veritabanındaki
-chunk'lar arasında en ilgili olanları cosine similarity ile bulur.
+rag/retriever.py — Hibrit Arama & Retrieval Motoru (rules.txt: Adım 8)
+========================================================================
+Bu modül, kullanıcının sorgusunu hem semantik (Dense Vector / Cosine Similarity)
+hem de sözcüksel/başlık (Lexical Match) olarak skorlayıp en ilgili bağlamı sunar.
 
-Neden cosine similarity?
-  Vektörlerin büyüklüğünden bağımsız olarak yön benzerliğini ölçer.
-  Kısa ve uzun metinlerin adil karşılaştırılmasını sağlar.
-  Embedding modelleri bu metrik için optimize edilmiştir.
-
-Ölçeklenebilirlik notu:
-  Bu implementasyon tüm vektörleri belleğe alarak karşılaştırır.
-  Küçük veri setleri (< 1000 chunk) için uygundur.
-  Daha büyük setlerde Chroma, FAISS veya Qdrant kullanılabilir.
+Kurumsal RAG İlkeleri (rules.txt Adım 8):
+  - Hibrit Arama: Semantik (0.60) + Sözcüksel/Kavramsal (0.40)
+  - Şeffaf Loglama: Neden bu chunk seçildi, skoru neydi?
+  - Bağlam Zenginleştirme: XML tabanlı temiz <belge> formatı.
 """
 
 import logging
+import re
 from typing import Optional
 
 import numpy as np
 
-from config import SCORE_THRESHOLD, TOP_K_CHUNKS
+from config import (
+    HYBRID_DENSE_WEIGHT,
+    HYBRID_LEXICAL_WEIGHT,
+    SCORE_THRESHOLD,
+    TOP_K_CHUNKS,
+)
 from db.manager import get_all_chunks
 from rag.embedder import Embedder
-
-import re
 
 logger = logging.getLogger(__name__)
 
 
 def calculate_lexical_score(query: str, chunk: dict) -> float:
     """
-    Sorgu ile chunk arasındaki sözcük, başlık ve dosya adı uyumunu hesaplar [0.0 - 1.0].
+    Sorgu ile chunk arasındaki sözcüksel, başlık ve tam kelime (exact word) uyumunu hesaplar [0.0 - 1.0].
     
-    Bu fonksiyon, saf semantik aramada (dense vector) gözden kaçabilen
-    kesin başlık ve kavram eşleşmelerini (örn. 'Python Programlama Dili')
-    öne çıkararak gürültüyü (noise) eler.
+    Kurumsal RAG İlkesi:
+      Semantik aramanın zayıf kalabildiği spesifik teknik terimleri (örn. 'def', 'class', 'RAG', 'ANN', 'SQL')
+      tam sözcük eşleşmesi (whole word match) ile anında tespit eder ve en üst sıraya taşır.
     """
-    words = re.findall(r"\w+", query.lower())
+    words = re.findall(r"\b[a-zA-ZçğıöşüÇĞİÖŞÜ0-9_]+\b", query.lower())
     stop_words = {
         "nedir", "nelerdir", "nasıl", "ve", "ile", "bir", "mi", "mı",
-        "mu", "mü", "bu", "şu", "hakkında", "için", "ne", "var", "yok"
+        "mu", "mü", "bu", "şu", "hakkında", "için", "ne", "var", "yok",
+        "hangi", "kadar", "olan", "olarak", "ise", "diye", "göre",
+        "neler", "nerede", "kimdir", "bunu", "buna", "şeylerin", "tadı",
+        "daha", "en", "çok", "az", "gibi"
     }
-    keywords = [w for w in words if w not in stop_words and len(w) > 1]
+    keywords = [w for w in words if w not in stop_words and len(w) >= 2]
     if not keywords:
         return 0.0
 
@@ -51,24 +53,31 @@ def calculate_lexical_score(query: str, chunk: dict) -> float:
 
     score = 0.0
     for kw in keywords:
-        # 1. Dosya adında geçiyorsa çok güçlü sinyal
+        # 1. Tam sözcük eşleşmesi kontrolü (\bkw\b)
+        exact_pattern = re.compile(rf"\b{re.escape(kw)}\b", re.IGNORECASE)
+        exact_matches = len(exact_pattern.findall(content_lower))
+
+        # 2. Dosya adında eşleşme
         if kw in source_lower:
-            score += 0.35
-        # 2. Başlıkta ([Konu: ...] veya [Belge: ...]) geçiyorsa çok güçlü sinyal
+            score += 0.30
+
+        # 3. Başlık satırında ([Konu: ...] veya ilk satır) eşleşme
         first_line = content_lower.split("\n")[0] if "\n" in content_lower else content_lower
         if kw in first_line:
-            score += 0.35
-        # 3. Metin içi frekans
-        count = content_lower.count(kw)
-        if count > 0:
-            score += min(0.3, count * 0.1)
+            score += 0.40
+
+        # 4. Tam sözcük (Exact Whole Word) eşleşme ağırlığı (Def, Class, RAG gibi kritik terimler için)
+        if exact_matches > 0:
+            score += min(0.60, 0.40 + (exact_matches - 1) * 0.10)
+        elif kw in content_lower:
+            score += 0.15
 
     return min(1.0, score)
 
 
 def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     """
-    İki vektör arasındaki cosine similarity değerini hesaplar.
+    İki vektör arasındaki cosine similarity değerini [-1.0, 1.0] hesaplar.
     """
     a = np.array(vec_a, dtype=np.float32)
     b = np.array(vec_b, dtype=np.float32)
@@ -84,7 +93,7 @@ def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
 class Retriever:
     """
-    SQLite'taki chunk'lar üzerinde Hibrit Arama (Dense Vector + Lexical) yapan sınıf.
+    SQLite'taki chunk'lar üzerinde Hibrit Arama (Dense Vector + Lexical) yapan motor.
     """
 
     def __init__(self, embedder: Embedder) -> None:
@@ -97,6 +106,7 @@ class Retriever:
     ) -> list[dict]:
         """
         Verilen sorgu için en ilgili chunk'ları hibrit puanlama ile döner.
+        rules.txt Adım 8: Şeffaf loglama ve doğru sıralama (reranking).
         """
         if not query or not query.strip():
             raise ValueError("Sorgu boş olamaz.")
@@ -106,19 +116,19 @@ class Retriever:
         # 1. Sorguyu embed et
         query_vector = self._embedder.embed(clean_query)
 
-        # 2. DB'den tüm chunk'ları al
+        # 2. DB'deki tüm chunk'ları al
         all_chunks = get_all_chunks()
 
         if not all_chunks:
             logger.warning("Veritabanı boş. Önce 'python ingest.py' çalıştırın.")
             return []
 
-        # 3. Hibrit skor hesapla (0.6 Dense + 0.4 Lexical)
+        # 3. Hibrit skor hesapla
         scored = []
         for chunk in all_chunks:
-            dense_score = cosine_similarity(query_vector, chunk["embedding"])
+            dense_score = max(0.0, cosine_similarity(query_vector, chunk["embedding"]))
             lexical_score = calculate_lexical_score(clean_query, chunk)
-            hybrid_score = 0.60 * dense_score + 0.40 * lexical_score
+            hybrid_score = (HYBRID_DENSE_WEIGHT * dense_score) + (HYBRID_LEXICAL_WEIGHT * lexical_score)
 
             scored.append({
                 "id": chunk["id"],
@@ -130,51 +140,44 @@ class Retriever:
                 "lexical_score": lexical_score,
             })
 
-        # 4. Hibrit skora göre sırala
+        # 4. Skora göre azalan sırala
         scored.sort(key=lambda x: x["score"], reverse=True)
 
-        # Düşük benzerlik skorlu chunk'ları ele
+        # 5. Eşik filtreleme
         filtered = [c for c in scored if c["score"] >= SCORE_THRESHOLD]
 
         if not filtered:
+            top_candidate_score = scored[0]["score"] if scored else 0.0
             logger.warning(
                 f"Hiçbir chunk SCORE_THRESHOLD ({SCORE_THRESHOLD}) eşiğini geçemedi. "
-                f"En yüksek skor: {scored[0]['score']:.4f}"
+                f"En yüksek skor: {top_candidate_score:.4f}"
             )
             return []
 
         top_chunks = filtered[:top_k]
 
-        logger.debug(
-            f"Top-{top_k} chunk bulundu. "
-            f"En yüksek skor: {top_chunks[0]['score']:.4f} "
-            f"({top_chunks[0]['source_name']})"
+        # rules.txt Adım 10: Şeffaf Retrieval Loglama
+        logger.info(
+            f"Retrieval Raporu (Top-{len(top_chunks)}): "
+            f"En yüksek skor: {top_chunks[0]['score']:.4f} (Dense: {top_chunks[0]['dense_score']:.4f}, "
+            f"Lexical: {top_chunks[0]['lexical_score']:.4f}) -> {top_chunks[0]['source_name']}"
         )
 
         return top_chunks
 
     def format_context(self, chunks: list[dict]) -> str:
         """
-        Chunk listesini LLM'e verilecek bağlam string'ine dönüştürür.
-
-        Modelin skorları, teknik metinleri veya başlıkları kopyalamasını engellemek için
-        temiz <belge kaynak="...">...</belge> yapısı kullanılır.
+        Seçilen chunk'ları LLM için temiz, okunabilir ve gürültüsüz bir metne dönüştürür.
         """
         if not chunks:
-            return "İlgili belge alıntısı bulunamadı."
+            return ""
 
-        parts = []
-        for chunk in chunks:
-            raw_content = chunk["content"]
-            # Başlıkların papağan gibi tekrarlanmasını önlemek için satır başı # başlıklarını temizle
-            clean_content = re.sub(r"^#+\s*.*$", "", raw_content, flags=re.MULTILINE).strip()
-            if not clean_content:
-                clean_content = raw_content.strip()
+        blocks = []
+        for i, chunk in enumerate(chunks, 1):
+            source = chunk.get("source_name", "belge")
+            content = chunk.get("content", "").strip()
+            # [Belge: ... | Konu: ...] başlığını kaldırıp saf içeriği alalım
+            clean_content = re.sub(r"^\[Belge:[^\]]+\]\s*", "", content).strip()
+            blocks.append(f"--- Kaynak {i} ({source}) ---\n{clean_content}")
 
-            parts.append(
-                f'<belge kaynak="{chunk["source_name"]}">\n'
-                f'{clean_content}\n'
-                f'</belge>'
-            )
-
-        return "\n\n".join(parts)
+        return "\n\n".join(blocks)
