@@ -30,6 +30,21 @@ from rag.retriever import Retriever
 logger = logging.getLogger(__name__)
 
 
+def _is_followup_question(question: str) -> bool:
+    """
+    Kullanıcı sorusunun önceki konuşmaya referans veren bir takip sorusu
+    olup olmadığını tespit eder. Bağımsız sorularda gereksiz LLM çağrısını önler.
+    """
+    q = question.strip().lower()
+    followup_triggers = [
+        "bunu", "bunun", "bunlar", "bunları", "burada", "buradaki",
+        "ondan", "onun", "onlar", "onları", "şunu", "şunun",
+        "peki", "detaylandır", "açıkla", "örnek ver", "neden peki",
+        "farkı ne", "farkları neler", "başka", "daha fazla", "devam et"
+    ]
+    return any(trigger in q for trigger in followup_triggers)
+
+
 @dataclass
 class RAGResponse:
     """
@@ -77,7 +92,7 @@ class RAGPipeline:
         self._retriever: Optional[Retriever] = None
         self._is_ready = False
 
-    def load(self) -> None:
+    def load(self, model_alias: Optional[str] = None) -> None:
         """
         Tüm modelleri yükler ve pipeline'ı hazır hale getirir.
         Bu işlem birkaç dakika sürebilir (özellikle ilk çalıştırmada).
@@ -87,7 +102,7 @@ class RAGPipeline:
           2. Chat modeli (büyük, yavaş)
           3. Retriever oluştur
         """
-        if self._is_ready:
+        if self._is_ready and model_alias is None:
             logger.debug("Pipeline zaten hazır.")
             return
 
@@ -100,10 +115,19 @@ class RAGPipeline:
         self._retriever = Retriever(self._embedder)
 
         # Chat modelini yükle
-        self._generator.load()
+        self._generator.load(model_alias=model_alias)
 
         self._is_ready = True
         logger.info("=== RAG Pipeline Hazır ===")
+
+    def switch_llm_model(self, model_alias: str) -> None:
+        """
+        Hali hazırda çalışan pipeline'da LLM modelini değiştirir.
+        Embedding modeli ve retriever değişmez.
+        """
+        logger.info(f"LLM model değiştiriliyor: {model_alias}")
+        self._generator.load(model_alias=model_alias)
+        logger.info(f"LLM model değiştirildi: {model_alias}")
 
     def ask(
         self,
@@ -131,7 +155,7 @@ class RAGPipeline:
 
         # 1. Takip sorusu tespiti ve sorgu yeniden yazımı
         search_query = clean_question
-        if chat_history and len(chat_history) > 0:
+        if chat_history and len(chat_history) > 0 and _is_followup_question(clean_question):
             search_query = self._generator.rewrite_query(clean_question, chat_history)
 
         logger.info(f"Arama sorgusu: '{search_query}'")
@@ -155,11 +179,11 @@ class RAGPipeline:
 
         # 2. Bağlamı hazırla
         context = self._retriever.format_context(top_chunks)
-        sources = [chunk["source_name"] for chunk in top_chunks]
+        sources = list(dict.fromkeys([chunk["source_name"] for chunk in top_chunks]))
 
         logger.info(
             f"Retrieval tamamlandı: {len(top_chunks)} chunk, "
-            f"kaynaklar: {list(set(sources))}"
+            f"kaynaklar: {sources}"
         )
 
         # 3. Cevap üret
