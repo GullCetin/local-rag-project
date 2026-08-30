@@ -53,8 +53,9 @@ CHUNK_MAX_CHARS = 800
 # ---------------------------------------------------------------------------
 # Retrieval Configuration
 # ---------------------------------------------------------------------------
-# Her sorgu için kaç chunk getirilsin? (Daha zengin bağlam için 4'e çıkarıldı)
-TOP_K_CHUNKS = 4
+# Her sorgu için kaç chunk getirilsin?
+# 2 = optimum token ve bağlam dengesi, CPU'da hızlı üretim
+TOP_K_CHUNKS = 2
 
 # ---------------------------------------------------------------------------
 # LLM Generation Parameters (Anti-repetition & quality tuning)
@@ -64,38 +65,22 @@ LLM_TOP_P = 0.9
 LLM_MAX_TOKENS = 450
 LLM_FREQUENCY_PENALTY = 0.5   # Repetition prevention
 LLM_PRESENCE_PENALTY = 0.2    # Topic progress & diversity
+
+# ---------------------------------------------------------------------------
+# LLM System Prompt (Compact & Structured for Professional Turkish Output)
+# ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """\
-# ROL VE TEMEL GÖREV
-Sen, bir Retrieval-Augmented Generation (RAG) sisteminin **Grounded Answer Generation Agent**'ısın.
-Görevin: Kullanıcı sorusuna YALNIZCA sana sağlanan <belge> alıntılarını temel alarak en doğru, açık, mantıklı ve doğrudan cevabı vermektir.
-
-# TEMEL ÇALIŞMA KURALLARI (MUTLAK KURAL):
-1. **Source of Truth (Tek Gerçek Kaynağı):**
-   - Sana verilen <belge> alıntıları tek bilgi kaynağındır.
-   - Belgelerde bulunmayan hiçbir olguyu, sayıyı, tarihi, ismi, kodu veya özelliği UYDURMA (Zero Hallucination).
-   - Bir aracın/SDK'nın adını veya detayını, sorulan ana kavramın tanımıymış gibi sunma (Noise Elimination).
-
-2. **Inference vs Invention (Çıkarım vs Uydurma):**
-   - Belgelerdeki doğrudan ifadeleri (Level 1) ve açık mantıksal sonuçları (Level 2) birleştirerek akıcı bir yanıt oluşturabilirsin.
-   - Ancak belgede olmayan harici varsayımları (Level 3) gerçek gibi sunma.
-
-3. **Cevap Yapısı & Doğallık:**
-   - Sorulan soruya doğrudan, net, profesyonel ve zengin bir Türkçe ile cevap ver.
-   - Soru bir kavramın tanımını istiyorsa (örn. "X nedir?"), belgedeki temel tanımından, özelliklerinden ve kullanım alanlarından sentez yaparak açıkla.
-   - Cevabının içine gereksiz teknik skorlar, prompt etiketleri veya iç düşünceler yazma.
-
-4. **Yetersiz Bilgi Durumu:**
-   - Eğer kullanıcının sorusu sağlanan belgelerle tamamen cevapsız kalıyorsa: "Sağlanan kaynak dokümanlarda bu konuda yeterli bilgi bulunmamaktadır." de.
-   - Eğer kısmen cevaplanabiliyorsa: Bilinen kısmı açıkla, bilinmeyen kısmın dokümanda yer almadığını belirt.
+Sen yardımsever, bilgili ve profesyonel bir yapay zeka asistanısın.
+Sağlanan kaynak belgelerdeki bilgilere dayanarak kullanıcının sorusunu net, maddeli ve doğru Türkçe ile yanıtlarsın.
+Belgelerde olmayan bilgiyi eklemezsin ve tekrara düşmezsin.
 """
 
-# Sohbet geçmişi olan takip sorularını bağımsız arama sorgusuna dönüştürme şablonu
+# Sorgu yeniden yazma şablonu (konuşma geçmişi için)
 QUERY_REWRITE_PROMPT = """\
 Aşağıdaki sohbet geçmişini ve kullanıcının son sorusunu incele.
-Kullanıcının son sorusu önceki konuşmaya atıfta bulunuyorsa (örneğin "detaylandır", "bunu açıkla", "örnek ver", "neden"), belge veritabanında semantik arama yapmaya uygun, tek başına anlamlı, kısa ve net bir arama sorgusuna dönüştür.
-Eğer kullanıcının sorusu zaten bağımsız ve net bir soruysa, soruyu değiştirmeden aynen döndür.
-
-SADECE ve YALNIZCA yeni arama sorgusunu yaz, başına/sonuna açıklama ekleme.
+Kullanıcının son sorusu önceki konuşmaya atıfta bulunuyorsa, belge veritabanında semantik arama yapmaya uygun, tek başına anlamlı, kısa bir arama sorgusuna dönüştür.
+Eğer zaten bağımsız bir soruysa, değiştirmeden döndür.
+SADECE yeni arama sorgusunu yaz, açıklama ekleme.
 """
 
 # ---------------------------------------------------------------------------
@@ -108,8 +93,8 @@ SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf"}
 # ---------------------------------------------------------------------------
 # Cosine similarity skoru bu değerin altındaki chunk'lar LLM'e verilmez.
 # 0.0 = hiç filtreleme yok, 1.0 = sadece mükemmel eşleşmeler
-# Tavsiye: 0.25 - 0.35 arası (model ve veri setine göre ayarla)
-SCORE_THRESHOLD = 0.25
+# Tavsiye: 0.15 - 0.25 arası
+SCORE_THRESHOLD = 0.18
 
 # ---------------------------------------------------------------------------
 # UI Configuration
