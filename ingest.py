@@ -14,12 +14,24 @@ Kullanım:
   python ingest.py docs/sample_docs/x.txt  # Tek dosya ingest et
 
 Desteklenen formatlar: .txt, .md, .pdf
+
+Önemli Düzeltmeler:
+  - Otomatik encoding tespiti (chardet): UTF-8, Windows-1254, ISO-8859-9 vb.
+  - Gürültü satırı temizleme: resim dosyası adı, alt-text slug gibi anlamsız satırlar.
 """
 
 import argparse
 import logging
 import os
+import re
 import sys
+
+# Windows konsol Unicode uyumluluğu
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Proje kök dizinini Python path'e ekle
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,7 +39,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import (
     CHUNK_MAX_CHARS,
     CHUNK_MIN_CHARS,
+    CHUNK_OVERLAP_CHARS,
+    IGNORED_FILE_PATTERNS,
     KNOWLEDGE_BASE_DIR,
+    MAX_CHUNKS_PER_FILE,
+    MAX_INGEST_FILE_SIZE_MB,
     SUPPORTED_EXTENSIONS,
 )
 from db.manager import initialize_db, save_chunks_batch, get_chunk_count, clear_source
@@ -41,15 +57,89 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Encoding tespiti için TÜM olası Türkçe/Windows encoding'leri
+_ENCODING_CANDIDATES = ["utf-8", "utf-8-sig", "windows-1254", "iso-8859-9", "cp857", "latin-1"]
+
+# Gürültü satırı kalıpları: resim dosyası adları, URL slug'ları vb.
+_NOISE_LINE_RE = re.compile(
+    r"^[A-Za-z0-9\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F._-]{2,60}$"
+)
+
+# Sayfa numarası kalıpları (örn: "Sayfa 1/10", "Page 3", "- 4 -")
+_PAGE_NUMBER_RE = re.compile(
+    r"^(?:sayfa\s*\d+(?:\s*/\s*\d+)?|page\s*\d+(?:\s*of\s*\d+)?|[-–—]\s*\d+\s*[-–—]|\d+\s*/\s*\d+)$",
+    re.IGNORECASE,
+)
+
+# Kurumsal kalıp uyarılar (Boilerplate / Disclaimer)
+_BOILERPLATE_PATTERNS = [
+    re.compile(r"^.*(gizlidir|confidential|taslaktır|draft|tüm hakları saklıdır|all rights reserved).*$", re.IGNORECASE),
+    re.compile(r"^.*(turna mobil uygulama|press enter or click to view image).*$", re.IGNORECASE),
+]
+
 
 # ---------------------------------------------------------------------------
 # Metin Okuyucular
 # ---------------------------------------------------------------------------
 
+def _detect_encoding(raw_bytes: bytes) -> str:
+    """
+    Ham byte dizisinden Türkçe karakter bütünlüğünü koruyan en doğru encoding'i seçer.
+
+    Strateji (rules.txt: Adım 2 - Doküman Temizleme & Karakter Bütünlüğü):
+      1. Aday encoding'leri decode et.
+      2. İçinde '' (\\ufffd) veya bozuk byte kalıntısı olanları derhal ele.
+      3. Türkçe karakter (ş, ğ, ü, ö, ç, ı, İ, Ğ, Ü, Ş, Ö, Ç) frekansı en yüksek olanı seç.
+    """
+    turkish_chars = set("şğüöçıİĞÜŞÖÇ")
+    candidates = ["utf-8", "iso-8859-9", "windows-1254", "cp857", "latin-1"]
+
+    best_enc = "utf-8"
+    best_score = -1
+
+    for enc in candidates:
+        try:
+            # errors='strict' ile dene, bozuk byte varsa yakala
+            decoded = raw_bytes.decode(enc, errors="replace")
+            # Eğer replacement char () varsa bu encoding hatalıdır, puanı kır
+            bad_char_count = decoded.count("\ufffd") + decoded.count("")
+            if bad_char_count > 0:
+                score = -bad_char_count
+            else:
+                # Türkçe karakter sayısına göre pozitif puan ver
+                tr_count = sum(1 for ch in decoded if ch in turkish_chars)
+                score = 1000 + tr_count
+
+            if score > best_score:
+                best_score = score
+                best_enc = enc
+        except Exception:
+            continue
+
+    logger.info(f"  Encoding analiz sonucu: '{best_enc}' (Skor: {best_score})")
+    return best_enc
+
+
 def read_txt(path: str) -> str:
-    """TXT ve Markdown dosyalarını okur."""
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        return f.read()
+    """
+    TXT ve Markdown dosyalarını okur.
+
+    UTF-8, Windows-1254, ISO-8859-9 gibi farklı encoding'leri otomatik
+    tespit eder. Türkçe karakterleri (ş, ğ, ü, ö, ı, ç) doğru okur.
+    """
+    with open(path, "rb") as f:
+        raw_bytes = f.read()
+
+    encoding = _detect_encoding(raw_bytes)
+    try:
+        text = raw_bytes.decode(encoding)
+    except (UnicodeDecodeError, LookupError):
+        # Tamamen beklenmedik bir hata: latin-1 her zaman çalışır
+        text = raw_bytes.decode("latin-1")
+        logger.warning(f"Encoding hatası ({encoding}), latin-1 kullanıldı: {path}")
+
+    logger.info(f"  Encoding: {encoding} → {os.path.basename(path)}")
+    return text
 
 
 def read_pdf(path: str) -> str:
@@ -101,38 +191,90 @@ def read_document(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Paragraf Bazlı Chunker
+# Doküman Temizleme & Ön İşleme (rules.txt: Adım 2 - Doküman Temizleme)
 # ---------------------------------------------------------------------------
+
+def _is_noise_line(line: str) -> bool:
+    """
+    Satırın gürültü, sayfa numarası, alt-text veya kalıp uyarı içerip içermediğini denetler.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    # Sayfa numarası kontrolü
+    if _PAGE_NUMBER_RE.match(stripped):
+        return True
+
+    # Kalıp uyarı / disclaimer kontrolü
+    for bp in _BOILERPLATE_PATTERNS:
+        if bp.match(stripped):
+            return True
+
+    # Boşluksuz slug / resim adı kontrolü
+    if _NOISE_LINE_RE.match(stripped) and len(stripped) < 50:
+        return True
+
+    if "-" in stripped and " " not in stripped and len(stripped) < 60:
+        return True
+
+    return False
+
+
+def clean_document_text(text: str) -> str:
+    """
+    rules.txt Adım 2 İlkelerine Göre Doküman Temizliği:
+      - Header / Footer tekrarlarını tespit edip eler.
+      - Sayfa numaraları ve baskı artıklarını temizler.
+      - Resim isimleri ve navigasyon slug'larını ayıklar.
+      - Ardışık boş satırları normalize eder.
+    """
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        if _is_noise_line(line):
+            continue
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
 
 def chunk_text(text: str, source_name: str = "") -> list[str]:
     """
-    Metni paragraf sınırlarına göre chunk'lara böler ve başlık bağlamıyla zenginleştirir.
-
-    Strateji:
-      1. Çift satır sonu (\n\n) ile paragrafları ayır
-      2. Başlıkları (# ve ##) takip et
-      3. Her chunk'ın başına [Kaynak: ... | Bölüm: ...] bağlamını ekle
-      4. CHUNK_MIN_CHARS'tan kısa olanları filtrele, uzun olanları alt parçalara böl
-
-    Neden Başlık Zenginleştirmesi (Contextual Chunking)?
-      İzole bir paragraf ("Demet (tuple): Sıralı ancak...") Python'dan bahsettiğini
-      açıkça belirtmeyebilir. Başlık bağlamı eklendiğinde embedding modeli bu bilginin
-      Python ile ilgili olduğunu anlar ve semantik arama başarımı %40+ artar.
+    rules.txt Adım 5 İlkelerine Göre Yapısal & Bağlamsal Chunking:
+      1. Ham metni temizle (clean_document_text).
+      2. Paragraf ve bölüm sınırlarına göre ayır.
+      3. Markdown (#, ##) ve numaralı ("1.", "2.") başlıkları hiyerarşik takip et.
+      4. Chunk'ların başına [Belge: ... | Konu: ...] bağlamını zerk et (Contextual Injection).
+      5. Uzun parçaları cümle bütünlüğünü ve overlap'i koruyarak böl.
 
     Args:
-        text: İşlenecek ham metin
-        source_name: Kaynak dosya adı (bağlam için)
+        text: Ham metin
+        source_name: Kaynak belge adı
 
     Returns:
-        Zenginleştirilmiş ve filtrelenmiş chunk listesi
+        Zenginleştirilmiş chunk listesi
     """
     if not text or not text.strip():
         return []
 
-    raw_paragraphs = text.split("\n\n")
+    cleaned_text = clean_document_text(text)
+    if not cleaned_text:
+        return []
+
+    raw_paragraphs = cleaned_text.split("\n\n")
     chunks = []
     current_section = ""
 
+    # Numaralı bölüm başlığı regex'i (ör: "5. Pilotlar havada uyur mu?")
+    _numbered_section_re = re.compile(r"^\d{1,2}\.\s+(.{4,90})$")
+
+    # 1. Aşama: Başlıkları ve paragrafları düzenle
+    structured_items = []
     for para in raw_paragraphs:
         para = para.strip()
         if not para:
@@ -143,27 +285,52 @@ def chunk_text(text: str, source_name: str = "") -> list[str]:
             lines = para.split("\n")
             header_line = lines[0].lstrip("#").strip()
             current_section = header_line
-            # Eğer paragrafta başlıktan sonra içerik varsa kalanını işle
             if len(lines) > 1:
-                para = "\n".join(lines[1:]).strip()
-            else:
-                continue  # Sadece başlıktan ibaretse bir sonraki paragrafa geç
+                body = "\n".join(lines[1:]).strip()
+                if body:
+                    structured_items.append((current_section, body))
+            continue
 
-        # Çok kısa metinleri atla
+        first_line = para.split("\n")[0].strip()
+        m = _numbered_section_re.match(first_line)
+        if m:
+            current_section = m.group(1).strip()
+
+        structured_items.append((current_section, para))
+
+    # 2. Aşama: Akıllı Paragraf Birleştirme (Smart Paragraph Merging)
+    # Giriş cümleleri (ör: ":" ile bitenler veya bir sonraki liste maddesine giriş yapanlar) birleştirilir
+    merged_items = []
+    idx = 0
+    while idx < len(structured_items):
+        sec, content = structured_items[idx]
+        
+        if idx + 1 < len(structured_items):
+            next_sec, next_content = structured_items[idx + 1]
+            is_lead_in = content.endswith(":") or (
+                len(content) < 200 and next_content.lstrip().startswith(("- ", "* ", "1. ", "• "))
+            )
+            if sec == next_sec and is_lead_in:
+                content = f"{content}\n{next_content}"
+                idx += 1  # sonraki paragrafı tükettik
+        
+        merged_items.append((sec, content))
+        idx += 1
+
+    # 3. Aşama: Bağlam enjeksiyonu ve boyut kontrolü
+    for sec, para in merged_items:
         if len(para) < CHUNK_MIN_CHARS:
             continue
 
-        # Başlık bağlam etiketi oluştur
         context_prefix = ""
-        if source_name or current_section:
-            prefix_parts = []
-            if source_name:
-                prefix_parts.append(f"Belge: {source_name}")
-            if current_section:
-                prefix_parts.append(f"Konu: {current_section}")
+        prefix_parts = []
+        if source_name:
+            prefix_parts.append(f"Belge: {source_name}")
+        if sec:
+            prefix_parts.append(f"Konu: {sec}")
+        if prefix_parts:
             context_prefix = f"[{' | '.join(prefix_parts)}]\n"
 
-        # Çok uzun chunk'ları maksimum boyuta böl
         if len(para) > CHUNK_MAX_CHARS:
             sub_chunks = _split_long_paragraph(para)
             for sub in sub_chunks:
@@ -176,42 +343,68 @@ def chunk_text(text: str, source_name: str = "") -> list[str]:
 
 def _split_long_paragraph(para: str) -> list[str]:
     """
-    CHUNK_MAX_CHARS'tan uzun paragrafı cümle ve kelime sınırlarına dikkat ederek böler.
-    Kelimelerin ortasından kesilmesini engeller.
+    Uzun metinleri cümle sınırlarında ve CHUNK_OVERLAP_CHARS örtüşmesiyle böler.
+    rules.txt Adım 5: Cümlelerin yarım kalmasını ve bağlam kopuşunu önler.
     """
-    # 1. Cümlelere ayır (. ! ? sonrası boşluk)
-    import re
-    sentences = re.split(r'(?<=[.!?])\s+', para)
-    
+    sentences = re.split(r"(?<=[.!?])\s+", para)
     result = []
-    current = ""
+    current_sentences = []
+    current_len = 0
 
     for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
+        s = sentence.strip()
+        if not s:
             continue
 
-        # Cümle tek başına CHUNK_MAX_CHARS'tan uzunsa kelimelere göre böl
-        if len(sentence) > CHUNK_MAX_CHARS:
-            words = sentence.split()
-            for word in words:
-                if len(current) + len(word) + 1 <= CHUNK_MAX_CHARS:
-                    current = f"{current} {word}".strip()
+        # Tek bir cümle CHUNK_MAX_CHARS'tan uzunsa kelimelerden böl
+        if len(s) > CHUNK_MAX_CHARS:
+            if current_sentences:
+                chunk_str = " ".join(current_sentences)
+                if len(chunk_str) >= CHUNK_MIN_CHARS:
+                    result.append(chunk_str)
+                current_sentences = []
+                current_len = 0
+
+            words = s.split()
+            w_chunk = []
+            w_len = 0
+            for w in words:
+                if w_len + len(w) + 1 <= CHUNK_MAX_CHARS:
+                    w_chunk.append(w)
+                    w_len += len(w) + 1
                 else:
-                    if current and len(current) >= CHUNK_MIN_CHARS:
-                        result.append(current)
-                    current = word
+                    if w_chunk:
+                        result.append(" ".join(w_chunk))
+                    w_chunk = [w]
+                    w_len = len(w)
+            if w_chunk and len(" ".join(w_chunk)) >= CHUNK_MIN_CHARS:
+                result.append(" ".join(w_chunk))
             continue
 
-        if len(current) + len(sentence) + 1 <= CHUNK_MAX_CHARS:
-            current = f"{current} {sentence}".strip() if current else sentence
+        if current_len + len(s) + 1 <= CHUNK_MAX_CHARS:
+            current_sentences.append(s)
+            current_len += len(s) + 1
         else:
-            if current and len(current) >= CHUNK_MIN_CHARS:
-                result.append(current)
-            current = sentence
+            if current_sentences:
+                chunk_str = " ".join(current_sentences)
+                if len(chunk_str) >= CHUNK_MIN_CHARS:
+                    result.append(chunk_str)
+                
+                # Overlap: Son cümleyi bir sonraki parçaya bağla (bağlam sürekliliği)
+                if len(current_sentences) > 1 and len(current_sentences[-1]) <= CHUNK_OVERLAP_CHARS:
+                    current_sentences = [current_sentences[-1], s]
+                    current_len = sum(len(x) + 1 for x in current_sentences)
+                else:
+                    current_sentences = [s]
+                    current_len = len(s)
+            else:
+                current_sentences = [s]
+                current_len = len(s)
 
-    if current and len(current) >= CHUNK_MIN_CHARS:
-        result.append(current)
+    if current_sentences:
+        chunk_str = " ".join(current_sentences)
+        if len(chunk_str) >= CHUNK_MIN_CHARS:
+            result.append(chunk_str)
 
     return result
 
@@ -220,18 +413,29 @@ def _split_long_paragraph(para: str) -> list[str]:
 # Dosya Keşfi
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Dosya Keşfi & Filtreleme (rules.txt: Adım 1 - Bilgi Envanteri)
+# ---------------------------------------------------------------------------
+
+def _is_ignored_filename(filename: str) -> bool:
+    """Hassas, çöp veya lisans dosyalarını regex listesine göre eler."""
+    fn_lower = filename.lower()
+    for pattern in IGNORED_FILE_PATTERNS:
+        if re.match(pattern, fn_lower):
+            return True
+    return False
+
+
 def discover_files(source: str) -> list[str]:
     """
-    Verilen yolun bir dosya veya klasör olduğuna göre
-    işlenecek dosyaların listesini döner.
-
-    Args:
-        source: Dosya veya klasör yolu
-
-    Returns:
-        İşlenecek dosya yollarının listesi
+    Verilen yoldaki desteklenen ve geçerli belgeleri keşfeder.
+    Kara listedeki lisans ve teknik dosyalar otomatik filtrelenir.
     """
     if os.path.isfile(source):
+        fname = os.path.basename(source)
+        if _is_ignored_filename(fname):
+            logger.warning(f"Dosya kara listede olduğundan atlandı: {fname}")
+            return []
         ext = os.path.splitext(source)[1].lower()
         if ext in SUPPORTED_EXTENSIONS:
             return [source]
@@ -242,6 +446,9 @@ def discover_files(source: str) -> list[str]:
     if os.path.isdir(source):
         files = []
         for fname in sorted(os.listdir(source)):
+            if _is_ignored_filename(fname):
+                logger.info(f"Filtrelendi (teknik/lisans/kara liste): {fname}")
+                continue
             ext = os.path.splitext(fname)[1].lower()
             if ext in SUPPORTED_EXTENSIONS:
                 files.append(os.path.join(source, fname))
@@ -258,6 +465,10 @@ def ingest_file(path: str, embedder: Embedder) -> int:
     """
     Tek bir dosyayı chunk'lara böler, embed eder ve DB'ye kaydeder.
 
+    Önceden boyut ve chunk sayısı limiti kontrolü yapılır:
+      - MAX_INGEST_FILE_SIZE_MB'den büyük dosyalar atlanır
+      - MAX_CHUNKS_PER_FILE'dan fazla chunk varsa ilk N tanesi alınır
+
     Args:
         path     : Dosya yolu
         embedder : Yüklenmiş Embedder instance'ı
@@ -267,6 +478,15 @@ def ingest_file(path: str, embedder: Embedder) -> int:
     """
     source_name = os.path.basename(path)
     logger.info(f"İşleniyor: {source_name}")
+
+    # 0. Dosya boyutu güvenlik kontrolü
+    file_size_mb = os.path.getsize(path) / (1024 * 1024)
+    if file_size_mb > MAX_INGEST_FILE_SIZE_MB:
+        logger.warning(
+            f"  Dosya çok büyük ({file_size_mb:.1f}MB > {MAX_INGEST_FILE_SIZE_MB}MB), atlanıyor: {source_name}\n"
+            f"  İpuçu: config.py'de MAX_INGEST_FILE_SIZE_MB değerini artırabilirsiniz."
+        )
+        return 0
 
     # 1. Metni oku
     try:
@@ -285,7 +505,15 @@ def ingest_file(path: str, embedder: Embedder) -> int:
         logger.warning(f"Chunk üretilemedi: {source_name}")
         return 0
 
-    logger.info(f"  {len(chunks)} chunk üretildi")
+    # Chunk sayısı limiti kontrolü
+    original_count = len(chunks)
+    if original_count > MAX_CHUNKS_PER_FILE:
+        chunks = chunks[:MAX_CHUNKS_PER_FILE]
+        logger.warning(
+            f"  {original_count} chunk üretildi, limit aşıldı → ilk {MAX_CHUNKS_PER_FILE} chunk kullanılıyor: {source_name}"
+        )
+    else:
+        logger.info(f"  {len(chunks)} chunk üretildi")
 
     # 3. Her chunk'ı embed et + batch kaydet
     batch = []
