@@ -157,17 +157,23 @@ class Retriever:
         """
         Chunk listesini LLM'e verilecek bağlam string'ine dönüştürür.
 
-        Modelin skorları ve teknik metinleri kopyalamasını engellemek için
-        temiz <belge kaynak="...">...</belge> XML yapısı kullanılır.
+        Modelin skorları, teknik metinleri veya başlıkları kopyalamasını engellemek için
+        temiz <belge kaynak="...">...</belge> yapısı kullanılır.
         """
         if not chunks:
             return "İlgili belge alıntısı bulunamadı."
 
         parts = []
         for chunk in chunks:
+            raw_content = chunk["content"]
+            # Başlıkların papağan gibi tekrarlanmasını önlemek için satır başı # başlıklarını temizle
+            clean_content = re.sub(r"^#+\s*.*$", "", raw_content, flags=re.MULTILINE).strip()
+            if not clean_content:
+                clean_content = raw_content.strip()
+
             parts.append(
                 f'<belge kaynak="{chunk["source_name"]}">\n'
-                f'{chunk["content"]}\n'
+                f'{clean_content}\n'
                 f'</belge>'
             )
 
