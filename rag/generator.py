@@ -61,23 +61,43 @@ def _clean_response(text: str) -> str:
     if "<think>" in cleaned and "</think>" not in cleaned:
         cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
 
-    # 2. Eğer model satır başında prompt etiketlerini (Cevap:, Yanıt:, Asistan: vb.) yankıladıysa en son cevabı al
-    # Cümle içinde geçen "güvenlik sorusu cevabı" gibi kelimeleri ASLA bölme!
-    prompt_marker_re = re.compile(r"(?im)^\s*(?:cevap|yanıt|answer|response|asistan|assistant)\s*:\s*")
+    # 2. Prompt echo temizleme: model user_message'ı yankıladıysa asıl cevabı yakala
+    #    "Aşağıdaki kaynak..." ile başlayan veya "SORU:" içeren blokları kes
+    soru_idx = cleaned.find("SORU:")
+    if soru_idx != -1:
+        # SORU: satırından sonrasını al (orada model cevap verir)
+        after_soru = cleaned[soru_idx + 5:].strip()
+        # Eğer sonrası anlamlıysa onu kullan
+        if len(after_soru) > 10:
+            cleaned = after_soru
+
+    # 3. Kaynak/belge prompt kalıplarını temizle
+    prompt_echo_patterns = [
+        r"(?im)^A\u015fa\u011f\u0131daki kaynak (belgeler?|metin)[^\n]*\n",
+        r"(?im)^Yaln\u0131zca bu belgelerdeki[^\n]*\n",
+        r"(?im)^Kaynak Metin:\s*\n",
+    ]
+    for pat in prompt_echo_patterns:
+        cleaned = re.sub(pat, "", cleaned)
+
+    # 4. Cevap/Yanıt etiket yankılamasını temizle
+    prompt_marker_re = re.compile(r"(?im)^\s*(?:cevap|yan\u0131t|answer|response|asistan|assistant)\s*:\s*")
     marker_parts = prompt_marker_re.split(cleaned)
     if len(marker_parts) > 1:
         last_part = marker_parts[-1].strip()
         if len(last_part) > 15:
             cleaned = last_part
 
-    # 3. Belge, Kaynak ve XML etiketlerini temizle
+    # 5. Belge, Kaynak ve XML etiketlerini temizle
     cleaned = re.sub(r"\[Belge:[^\]]+\]", "", cleaned)
     cleaned = re.sub(r"---\s*Kaynak\s*\d+[^-\n]*---", "", cleaned)
     cleaned = re.sub(r"</?belge[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</?source[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</?doc[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    # [KAYNAK N: ...] etiketlerini temizle (retriever format)
+    cleaned = re.sub(r"\[KAYNAK\s*\d+:[^\]]*\]", "", cleaned)
 
-    # 4. Ardışık tekrar eden satırları temizle
+    # 6. Ardışık tekrar eden satırları temizle
     lines = cleaned.split("\n")
     deduped_lines = []
     prev_line = None
@@ -91,7 +111,7 @@ def _clean_response(text: str) -> str:
     cleaned_result = "\n".join(deduped_lines).strip()
     cleaned_result = re.sub(r"[<]+$", "", cleaned_result).strip()
 
-    # 5. Cümle bazında n-gram döngü filtresi
+    # 7. Cümle bazında n-gram döngü filtresi
     sentences = re.split(r"(?<=[.!?\n])\s+", cleaned_result)
     seen_counts = {}
     valid_sentences = []
@@ -295,18 +315,20 @@ class Generator:
                 "Chat modeli yüklenmemiş. Önce generator.load() çağırın."
             )
 
-        MAX_CONTEXT_CHARS = 4500
+        MAX_CONTEXT_CHARS = 6000
         if len(context) > MAX_CONTEXT_CHARS:
             context = context[:MAX_CONTEXT_CHARS] + "\n...[bağlam optimize edildi]"
             logger.warning(f"Bağlam {MAX_CONTEXT_CHARS} karaktere optimize edildi.")
 
         user_message = (
-            f"Aşağıdaki kaynak metne dayanarak '{question}' sorusunu Türkçe olarak detaylı, net ve eksiksiz yanıtla.\n\n"
-            f"Kaynak Metin:\n{context}"
+            f"KAYNAK BELGELER:\n\n{context}\n\n"
+            f"SORU: {question}\n\n"
+            f"Yukarıdaki kaynak belgelerden YALNIZCA bu soruyu cevaplayın. "
+            f"Doğrudan ve kısa cevaplayın. Kaynak'ta yoksa belirtin."
         )
 
         messages = [
-            {"role": "system", "content": "Verilen kaynak metindeki bilgilere dayanarak soruları Türkçe olarak doğrudan ve eksiksiz yanıtlayan profesyonel bir asistansın. Metinde yer almayan dış bilgileri ekleme."},
+            {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_message},
         ]
 

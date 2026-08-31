@@ -70,44 +70,55 @@ MAX_CHUNKS_PER_FILE = 200
 CHUNK_MIN_CHARS = 50
 
 # Bir chunk'ın maximum karakter sayısı (bağlamı koparmadan bölmek için)
-CHUNK_MAX_CHARS = 800
+CHUNK_MAX_CHARS = 1000
 
 # Paragraflar veya alt parçalar arası örtüşme (overlap) karakter sayısı
-CHUNK_OVERLAP_CHARS = 80
+# rules.txt Adım 5: Bağlam kopmasını azaltmak için daha büyük overlap
+CHUNK_OVERLAP_CHARS = 120
 
 # ---------------------------------------------------------------------------
 # Retrieval Configuration (rules.txt: Adım 8 - Retrieval Tasarımı)
 # ---------------------------------------------------------------------------
 # Her sorgu için en odaklı kaç chunk getirilsin?
-# 3 chunk = Tam ve zengin bağlam (giriş cümleleri + maddeler + detaylar)
-TOP_K_CHUNKS = 3
+# 5 chunk = Daha zengin bağlam; rules.txt Adım 8: doğru miktarda bağlam
+TOP_K_CHUNKS = 5
 
 # Hibrit Arama Ağırlıkları: Dense (Semantik) + Lexical (Sözcük/Başlık)
-HYBRID_DENSE_WEIGHT = 0.60
-HYBRID_LEXICAL_WEIGHT = 0.40
+# Türkçe için semantik biraz daha ağır; rules.txt Adım 6 & 8
+HYBRID_DENSE_WEIGHT = 0.65
+HYBRID_LEXICAL_WEIGHT = 0.35
 
 # Cosine similarity / Hibrit skor filtre eşiği (alakasız belgeleri eler)
-SCORE_THRESHOLD = 0.30
+# 0.25: Az belgeli ortamlarda daha kapsayıcı; rules.txt Adım 8
+SCORE_THRESHOLD = 0.25
 
 # ---------------------------------------------------------------------------
 # LLM Generation Parameters (rules.txt: Adım 9 - Modelin Sınırlarını Yönetmek)
 # ---------------------------------------------------------------------------
 LLM_TEMPERATURE = 0.1
 LLM_TOP_P = 0.9
-LLM_MAX_TOKENS = 512
+# rules.txt Adım 9: 512 çok kısa, cevaplar kesiliyor → 1024'e çıkarıldı
+LLM_MAX_TOKENS = 1024
 LLM_FREQUENCY_PENALTY = 0.3
 LLM_PRESENCE_PENALTY = 0.1
 
 # ---------------------------------------------------------------------------
 # LLM System Prompt (rules.txt: Adım 0 ve Adım 9 - Grounded Generation)
 # ---------------------------------------------------------------------------
+# rules.txt Adım 9: Kesin kaynak dayanaklı üretim — uydurma yok, kaynak dayanaklı
 SYSTEM_PROMPT = """\
-Sen bir Belge Soru-Cevap asistanısın.
-Görevin: Verilen KAYNAK BELGELER'deki bilgilere göre kullanıcının sorusunu Türkçe olarak net ve doğrudan yanıtlamaktır.
-Kural 1: Yalnızca verilen belgelerdeki bilgileri kullan.
-Kural 2: Eğer belgelerde bilgi yoksa "Verilen belgelerde bu bilgi yer almamaktadır." de.
-Kural 3: Doğrudan cevabı yaz, gereksiz giriş cümleleri ekleme.
+Sen kurumsal belgelere dayalı, güvenilir bir Türkçe soru-cevap asistanısın.
+
+Temel kurallar:
+1. YALNIZCA verilen kaynak belgelerindeki bilgileri kullan. Dış bilgin varsa onu kullanma.
+2. Belgede yoksa: "Verilen belgelerde bu konuda bilgi yer almamaktadır." yaz ve dur.
+3. Cevabı doğrudan ver. "Elbette", "Tabii ki", "Merhaba" gibi giriş ifadeleri yazma.
+4. ÖZLÜLÜK: Basit olgusal sorulara (renk, sayı, isim, tarih gibi) TEK CÜMLE veya madde ile cevap ver. Gereksiz açıklama ekleme.
+5. Karmaşık sorularda madde madde veya adım adım anlat.
+6. Kaynaklarda çelişen bilgi varsa, her iki kaynağı da belirt.
+7. Cevabını bitirince dur. Tekrar etme, yorum ekleme.
 """
+
 
 # Sorgu yeniden yazma şablonu (konuşma geçmişi için)
 QUERY_REWRITE_PROMPT = """\

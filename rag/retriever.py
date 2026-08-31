@@ -167,7 +167,8 @@ class Retriever:
 
     def format_context(self, chunks: list[dict]) -> str:
         """
-        Seçilen chunk'ları LLM için temiz, okunabilir ve gürültüsüz bir metne dönüştürür.
+        Seçilen chunk'ları LLM için temiz, numaralı ve kaynak etiketli formata dönüştürür.
+        rules.txt Adım 8 & 9: Şeffaf kaynak işaretleme ve gürültüsüz bağlam.
         """
         if not chunks:
             return ""
@@ -178,6 +179,9 @@ class Retriever:
             content = chunk.get("content", "").strip()
             # [Belge: ... | Konu: ...] başlığını kaldırıp saf içeriği alalım
             clean_content = re.sub(r"^\[Belge:[^\]]+\]\s*", "", content).strip()
-            blocks.append(f"--- Kaynak {i} ({source}) ---\n{clean_content}")
+            score = chunk.get("score", 0.0)
+            blocks.append(
+                f"[KAYNAK {i}: {source} | Alaka Skoru: {score:.2f}]\n{clean_content}"
+            )
 
-        return "\n\n".join(blocks)
+        return "\n\n---\n\n".join(blocks)
