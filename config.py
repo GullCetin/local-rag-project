@@ -29,9 +29,9 @@ SAMPLE_DOCS_DIR = os.path.join(BASE_DIR, "docs", "sample_docs")
 # qwen3-4b    : ~2.8GB, ~20-35sn, dengeli
 # phi-3.5-mini: ~2.6GB, ~30-60sn, çok yönlü
 AVAILABLE_LLM_MODELS = [
-    ("qwen3-1.7b",   "Qwen3-1.7B  ⚡ (Hızlı ~8-15sn, 1.4GB)"),
-    ("qwen3-4b",     "Qwen3-4B   ⚡⚡ (Dengeli ~20-35sn, 2.8GB)"),
-    ("phi-3.5-mini", "Phi-3.5-mini  (Yavaş ~30-60sn, 2.6GB)"),
+    ("qwen3-1.7b",   "Qwen3-1.7B"),
+    ("qwen3-4b",     "Qwen3-4B"),
+    ("phi-3.5-mini", "Phi-3.5-mini"),
 ]
 
 # Aktif LLM model alias  — AVAILABLE_LLM_MODELS listesindeki alias'lardan biri olmalı
