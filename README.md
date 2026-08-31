@@ -1,7 +1,7 @@
-# Local RAG AI Assistant
+# Local RAG — Kurumsal Şartname ve Proje Asistanı
 
-Tamamen çevrimdışı çalışan, Microsoft Foundry Local tabanlı yerel belge Q&A sistemi.  
-Belgelerinize soru sorun — internet bağlantısı gerekmez.
+Tamamen çevrimdışı (offline/on-device) çalışan, Microsoft Foundry Local tabanlı yerel PRD, UI/UX Şartnamesi ve Yazılım Analiz Asistanı.  
+Gizli kurumsal proje dokümanlarınıza soru sorun — sıfır veri sızıntısı, internet bağlantısı gerekmez.
 
 ---
 
