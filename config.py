@@ -35,7 +35,7 @@ AVAILABLE_LLM_MODELS = [
 ]
 
 # Aktif LLM model alias  — AVAILABLE_LLM_MODELS listesindeki alias'lardan biri olmalı
-LLM_MODEL_ALIAS = "qwen3-1.7b"
+LLM_MODEL_ALIAS = "phi-3.5-mini"
 EMBEDDING_MODEL_ALIAS = "qwen3-embedding-0.6b"
 
 # Foundry Local uygulaması adı (SDK loglama için)
@@ -80,8 +80,8 @@ CHUNK_OVERLAP_CHARS = 120
 # Retrieval Configuration (rules.txt: Adım 8 - Retrieval Tasarımı)
 # ---------------------------------------------------------------------------
 # Her sorgu için en odaklı kaç chunk getirilsin?
-# 5 chunk = Daha zengin bağlam; rules.txt Adım 8: doğru miktarda bağlam
-TOP_K_CHUNKS = 5
+# top_k=2: Ablasyon benchmarkında optimum hız (TTFT ~12s) ve tam doğruluk dengesi
+TOP_K_CHUNKS = 2
 
 # Hibrit Arama Ağırlıkları: Dense (Semantik) + Lexical (Sözcük/Başlık)
 # Türkçe için semantik biraz daha ağır; rules.txt Adım 6 & 8
@@ -89,8 +89,8 @@ HYBRID_DENSE_WEIGHT = 0.65
 HYBRID_LEXICAL_WEIGHT = 0.35
 
 # Cosine similarity / Hibrit skor filtre eşiği (alakasız belgeleri eler)
-# 0.25: Az belgeli ortamlarda daha kapsayıcı; rules.txt Adım 8
-SCORE_THRESHOLD = 0.25
+# 0.32: Negatif sorgu sızıntılarını (0.29) %100 engeller, pozitif Top-1/Top-2 kapsamını korur
+SCORE_THRESHOLD = 0.32
 
 # ---------------------------------------------------------------------------
 # LLM Generation Parameters (rules.txt: Adım 9 - Modelin Sınırlarını Yönetmek)
