@@ -73,6 +73,10 @@ def _is_incomplete_terminal_line(line: str) -> bool:
     if not raw:
         return False
 
+    # Eğer tek veya iki kelimelik boş bir etiket/başlık ise (örn: 'Form:', 'Kaynak:', 'Not:') yarımdır
+    if re.match(r"^[a-zA-ZçğıöşüÇĞİÖŞÜ0-9_ -]{1,20}:\s*$", raw):
+        return True
+
     # Bitiş noktalama / format işaretleri varsa tamamlanmıştır
     has_completion_punc = raw.endswith((".", ":", "!", "?", '"', "'", ")", "}", "]", "`", "|"))
     if has_completion_punc:
@@ -346,14 +350,9 @@ class Generator:
           - Beklenen cevap madde sayısı (soru cümlesindeki bağlaç + liste sinyalleri)
           - Context büyüklüğü (büyük context = daha fazla fact getirilmiş = biraz daha budget)
           - Soru uzunluğu (uzun soru = karmaşık kapsam = biraz daha budget)
+        Tekil/kısa sorulara daha sıkı, çoklu/kapsamlı sorulara güvenli yeterli alan tanır.
         Upper bound her zaman LLM_MAX_TOKENS ile sınırlanır.
         """
-        # Soru içerisindeki çoklu-fact sinyallerini say.
-        # NOT: "neler(?:dir)?" yerine "neler" kullanılıyor.
-        # Neden: "nelerdir" match'i B için budget'i 165→04'e taşıyor ve
-        # bu ekstra budget KURAL label echo'yu tetikliyor (B regresyon).
-        # C için (API rate limit completeness) budget yetersizliği
-        # phi-3.5-mini model kapasitesi ile ilgili, prompt ile çözülemiyor.
         multi_fact_signals = re.findall(
             r"\b(?:ve|ile|ayrıca|birlikte|neler|hangileri|listele|tüm|hepsi|bütün)\b",
             question.lower()
@@ -363,15 +362,15 @@ class Generator:
         # Context büyüklüğü sinyali (karaktere göre yaklaşık token)
         ctx_token_approx = len(context) // 4
 
-        # Base budget: kısa/tek-fact için 120, her ek sinyal +40, context büyüklüğü +20 bonus
-        base = 120
-        signal_bonus = min(n_signals * 40, 160)   # en fazla 4 ek sinyal kabul edilir (4*40=160)
-        context_bonus = min(ctx_token_approx // 50, 40)  # bağlam büyüdükçe max +40
-        question_len_bonus = min(len(question) // 30, 30)  # uzun soru max +30
+        # Tekil/kısa sorular için 80 base, çoklu sorular için 120 base
+        base = 80 if n_signals == 0 and len(question) < 70 else 120
+        signal_bonus = min(n_signals * 35, 140)
+        context_bonus = min(ctx_token_approx // 60, 30)
+        question_len_bonus = min(len(question) // 40, 20)
 
         budget = base + signal_bonus + context_bonus + question_len_bonus
-        # Güvenlik tavanı: 300 (350'nin altında kalarak gereksiz verbosity azaltılıyor)
-        return min(budget, 300)
+        # Güvenlik tavanı: 260 (kesilme yapmadan gereksiz uzamayı sınırlar)
+        return min(budget, 260)
 
     def rewrite_query(self, question: str, chat_history: list[dict]) -> str:
         """
@@ -463,18 +462,59 @@ class Generator:
             logger.info(f"LLM çağrısı başlatılıyor | token_budget={token_budget}...")
 
             chat_t0 = time.perf_counter()
-            response = self._chat_client.complete_chat(messages=messages)
+            ttft_sec = None
+            raw_output = ""
+            completion_tokens = 0
+            prompt_tokens = None
+            finish_reason = "stop"
+
+            try:
+                # 1. Hızlı ve Erken Durduran Streaming Akışı
+                stream = self._chat_client.complete_streaming_chat(messages=messages)
+                for chunk in stream:
+                    if hasattr(chunk, "choices") and chunk.choices and len(chunk.choices) > 0:
+                        choice = chunk.choices[0]
+                        delta = choice.delta
+                        delta_content = delta.content if hasattr(delta, "content") else ""
+                        if delta_content:
+                            if ttft_sec is None:
+                                ttft_sec = round(time.perf_counter() - chat_t0, 3)
+                            raw_output += delta_content
+                            completion_tokens += 1
+
+                            # Tekrar döngüsü tespiti halinde erken durma
+                            is_loop, _ = _detect_repetition_loop(raw_output)
+                            if is_loop:
+                                finish_reason = "repetition_early_stop"
+                                logger.info(f"Tekrar döngüsü yakalandı, stream erken sonlandırıldı.")
+                                break
+
+                            # Prompt etiket echo / gereksiz tekrar başlangıcı tespiti
+                            if len(raw_output) > 40:
+                                tail = raw_output[-50:].lower()
+                                if any(stop_pat in tail for stop_pat in ["\nkural ", "\nformat:", "\nsayısal doğruluk:", "\nform:"]):
+                                    finish_reason = "label_echo_early_stop"
+                                    logger.info(f"Etiket tekrarı yakalandı, stream erken sonlandırıldı.")
+                                    break
+
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        prompt_tokens = getattr(chunk.usage, "prompt_tokens", prompt_tokens)
+
+            except Exception as stream_exc:
+                logger.warning(f"Streaming başarısız, standart complete_chat fallback uygulanıyor: {stream_exc}")
+                response = self._chat_client.complete_chat(messages=messages)
+                if response and response.choices and len(response.choices) > 0:
+                    raw_output = response.choices[0].message.content or ""
+                if response and hasattr(response, "usage") and response.usage:
+                    prompt_tokens = getattr(response.usage, "prompt_tokens", None)
+                    completion_tokens = getattr(response.usage, "completion_tokens", None)
+
             chat_duration_sec = time.perf_counter() - chat_t0
-
-            if response and response.choices and len(response.choices) > 0:
-                raw_output = response.choices[0].message.content or ""
-
-            if response and hasattr(response, "usage") and response.usage:
-                token_usage = {
-                    "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
-                    "completion_tokens": getattr(response.usage, "completion_tokens", None),
-                    "total_tokens": getattr(response.usage, "total_tokens", None),
-                }
+            token_usage = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": (prompt_tokens + completion_tokens) if (prompt_tokens and completion_tokens) else None,
+            }
 
             has_think_block = ("<think>" in raw_output and "</think>" in raw_output and len(raw_output.split("</think>")[0].replace("<think>", "").strip()) > 5)
 
@@ -488,6 +528,7 @@ class Generator:
                 "prompt_char_count": prompt_char_count,
                 "context_char_count": len(context),
                 "question_char_count": len(question),
+                "ttft_sec": ttft_sec,
                 "chat_duration_sec": round(chat_duration_sec, 3),
                 "clean_duration_sec": round(clean_duration_sec, 5),
                 "total_duration_sec": round(total_duration_sec, 3),
@@ -495,14 +536,16 @@ class Generator:
                 "cleaned_output_length": len(clean_answer),
                 "has_think_block": has_think_block,
                 "token_usage": token_usage,
+                "finish_reason": finish_reason,
                 "raw_output": raw_output,
             }
 
             logger.info(
                 f"LLM Tamamlandı | Süre: {chat_duration_sec:.2f}s | "
-                f"Prompt Tokens: {token_usage.get('prompt_tokens')} | "
-                f"Completion Tokens: {token_usage.get('completion_tokens')} | "
-                f"Clean Len: {len(clean_answer)}"
+                f"TTFT: {ttft_sec or 0:.2f}s | "
+                f"Prompt Tokens: {prompt_tokens} | "
+                f"Completion Tokens: {completion_tokens} | "
+                f"Finish: {finish_reason}"
             )
 
             if clean_answer and clean_answer.strip():

@@ -231,6 +231,24 @@ class Retriever:
 
         top_chunks = filtered[:top_k]
 
+        # Score-Gap Tabanlı Dinamik Context Azaltma (Latency & Prefill Optimizasyonu):
+        # Eğer ilk chunk açık ara yüksek skorluysa (örn. >= 0.50) ve sonraki chunk Top-1'e göre belirgin şekilde zayıfsa
+        # (oran < 0.70 ve skor < 0.50), alakasız 2. chunk'ı eleyerek modele gereksiz CPU prefill yükü bindirmeyi önler.
+        # Çoklu doküman (multi-doc) sorularında ise her iki chunk da yüksek/yakın skora sahip olduğu için korunur.
+        if len(top_chunks) > 1:
+            top1_score = top_chunks[0]["score"]
+            pruned_chunks = [top_chunks[0]]
+            for c in top_chunks[1:]:
+                ratio = c["score"] / top1_score if top1_score > 0 else 0.0
+                if c["score"] >= 0.50 or ratio >= 0.70:
+                    pruned_chunks.append(c)
+                else:
+                    logger.info(
+                        f"Score-gap filtresi: Gürültü chunk elendi ({c['source_name']}, "
+                        f"skor: {c['score']:.4f}, oran: {ratio:.2f})"
+                    )
+            top_chunks = pruned_chunks
+
         # rules.txt Adım 10: Şeffaf Retrieval Loglama
         logger.info(
             f"Retrieval Raporu (Top-{len(top_chunks)}): "
