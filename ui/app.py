@@ -1223,15 +1223,6 @@ def render_messages() -> None:
                     f'<div class="src-chips">{chips}</div>'
                     f'</div>'
                 )
-            meta_parts = []
-            if latency:
-                meta_parts.append(f'<span class="msg-meta-item">⏱ {html.escape(latency)}</span>')
-            if chunks_used:
-                meta_parts.append(f'<span class="msg-meta-item">📦 {chunks_used} {t("chunks_label")}</span>')
-            meta_html = (
-                f'<div class="msg-meta-row">{"<span class=\"msg-meta-sep\">·</span>".join(meta_parts)}</div>'
-                if meta_parts else ""
-            )
             st.markdown(
                 f'''<div class="msg-bot-wrap">
                     <div class="msg-bot-header">
@@ -1245,7 +1236,6 @@ def render_messages() -> None:
                     <div class="msg-bot-card">
                         <div class="msg-bot-body">{body_html}</div>
                         {src_html}
-                        {meta_html}
                     </div>
                 </div>''',
                 unsafe_allow_html=True,
@@ -1324,37 +1314,21 @@ def main():
 
     if st.session_state.pending_question:
         question = st.session_state.pending_question
-        # Hard-code answers for specific RAG-style questions with simulated thinking time (preserved)
-        q_norm = question.strip().lower()
-        special_q = "mobil uygulamamızda hata rengi ne olarak belirlenmiştir"
-        if q_norm == special_q:
-            time.sleep(9.5)
-            bot_content = "Uygulamanın Hata / Uyarı Rengi (Error): #DC2626 (Kırmızı) olarak belirlenmiştir"
-            sources = ["Belge Onizlemesi: mobil_uygulama_tasarim_kilavuzu.md"]
-            chunks_used = 0
-            lat = "9.5s"
-        elif "refresh token geçerlilik süresi ne kadardır" in q_norm or q_norm.startswith("refresh token geçerlilik süresi ne kadardır"):
-            time.sleep(20)
-            bot_content = "Refresh Token Geçerlilik Süresi:7 gündür"
-            sources = ["api_ve_guvenlik_politikasi.md"]
-            chunks_used = 0
-            lat = "20.0s"
-        else:
-            with st.spinner(t("searching")):
-                try:
-                    pip = st.session_state.pipeline
-                    response = pip.ask(question, chat_history=st.session_state.messages[:-1])
-                    lat = f"{response.latency_sec:.1f}s"
-                    if response.has_error:
-                        bot_content = f"Hata: {response.error}"
-                        sources = []; chunks_used = 0
-                    else:
-                        bot_content = response.answer
-                        sources = response.unique_sources
-                        chunks_used = response.chunks_used
-                except Exception as e:
-                    bot_content = f"Hata: {e}"
-                    sources = []; chunks_used = 0; lat = ""
+        with st.spinner(t("searching")):
+            try:
+                pip = st.session_state.pipeline
+                response = pip.ask(question, chat_history=st.session_state.messages[:-1])
+                lat = f"{response.latency_sec:.1f}s"
+                if response.has_error:
+                    bot_content = f"Hata: {response.error}"
+                    sources = []; chunks_used = 0
+                else:
+                    bot_content = response.answer
+                    sources = response.unique_sources
+                    chunks_used = response.chunks_used
+            except Exception as e:
+                bot_content = f"Hata: {e}"
+                sources = []; chunks_used = 0; lat = ""
 
         st.session_state.messages.append({
             "role": "assistant", "content": bot_content,
@@ -1362,6 +1336,7 @@ def main():
         })
         st.session_state.pending_question = None
         st.rerun()
+
 
     prompt = st.chat_input(placeholder=t("placeholder"), disabled=not pipeline_ready)
     if prompt and prompt.strip():

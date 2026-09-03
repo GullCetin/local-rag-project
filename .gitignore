@@ -4,31 +4,37 @@ venv/
 env/
 ENV/
 
-# Local RAG project — generated data (do not commit)
+# Local RAG project — generated data & databases (do not commit)
 data/
 *.db
+*.sqlite
+*.sqlite3
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 
 # Environment variables & secrets
 .env
 .env.local
 *.env
+*.secrets.toml
+.streamlit/secrets.toml
 
-# Specific excluded documents & internal plans
-Summer School Foundry Local Plan.docx
+# Development / Agent artifacts & scratchpads
+.agents/
+scratch/
 *.docx
 agent_rules.md
 implementation_plan.md
-docx_content.txt
-test_hybrid.py
-scratch*.py
-debug_*.py
+walkthrough.md
+rules.txt
+sunum_metni.md
+ui.md
 
-# Security: API key files must NEVER be committed
+# Security: Sensitive / Key files
 *ApiKey*
 *apikey*
 *api_key*
@@ -44,3 +50,4 @@ debug_*.py
 # OS generated files
 .DS_Store
 Thumbs.db
+*.log

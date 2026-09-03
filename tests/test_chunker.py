@@ -53,7 +53,7 @@ class TestChunkText(unittest.TestCase):
         chunks = chunk_text(long_para)
         self.assertGreater(len(chunks), 1)
         for chunk in chunks:
-            self.assertLessEqual(len(chunk), 800)
+            self.assertLessEqual(len(chunk), CHUNK_MAX_CHARS)
 
     def test_chunks_are_stripped(self):
         """Her chunk başında/sonunda boşluk olmamalı."""
