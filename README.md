@@ -20,6 +20,10 @@ Documents are processed and indexed locally. Queries are embedded locally, relev
 
 This makes the project suitable for experimenting with **private, document-grounded AI assistants** without requiring an external LLM API for inference.
 
+<p align="center">
+  <img src="docs/images/ui_chat.png" alt="Local RAG Assistant Web Interface" width="90%">
+</p>
+
 ---
 
 ## Features
@@ -281,6 +285,12 @@ http://localhost:8501
 
 From the interface you can manage documents and ask questions about the indexed knowledge base.
 
+#### Interface Preview
+
+| Welcome & Knowledge Base Overview | Document-Grounded Q&A Response |
+| :---: | :---: |
+| ![Web Interface - Welcome Screen](docs/images/ui_home.png) | ![Web Interface - Grounded Q&A](docs/images/ui_chat.png) |
+
 ### CLI
 
 For terminal usage:
@@ -499,12 +509,6 @@ Grounded Answer
 ```
 
 The project is functional, but the architecture and evaluation strategy can continue to evolve.
-
----
-
-## License
-
-See the `LICENSE` file for the applicable license.
 
 ---
 
